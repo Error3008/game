@@ -1,0 +1,10 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://deeu45llugg75"]
+
+[ext_resource type="Texture2D" uid="uid://dqdaxnsl4pesq" path="res://textures/terrain_texture.png" id="1_aai8g"]
+
+[resource]
+resource_name = "rock_material"
+cull_mode = 2
+albedo_texture = ExtResource("1_aai8g")
+albedo_texture_force_srgb = true
+roughness = 0.5
