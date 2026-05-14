@@ -24,15 +24,13 @@ const CLOUD = preload("uid://bk1conydogbu4")
 		show_lines = value
 		show_cloud_lines()
 		
-@export var spawn_random: bool = false
-@export var move: bool = false
+@export var spawn_and_move: bool = false
 
 @export_group("Layout Settings")
 @export var start_position : Vector3 = Vector3(0.0, 100.0, 0.0)
 @export var lines_length : float = 100.0
 @export var lines_count : int = 3
 @export var distance_between_lines : float = 20.0
-@export var second_layer : bool = false
 @export var wind : Vector2 = Vector2(1.0, 0.0)
 @export var max_line_speed : float = 15
 @export var min_line_speed : float = 5
@@ -42,12 +40,30 @@ const CLOUD = preload("uid://bk1conydogbu4")
 var spawn_timer: float = 0.0
 
 @export_group("Cloud Structure")
-
+#@export var global_cloud_scale: float = 1.0:
+	#set(value):
+		#var ratio = value / global_cloud_scale if global_cloud_scale != 0 else value
+		#global_cloud_scale = value
+		#
+		#core_scale *= ratio
+		#max_child_scale *= ratio
+		#min_child_scale *= ratio
+		#notify_property_list_changed()
+		
 @export var cloud_scale: float = 1.0
+@export var overlap_threshold: float = 1.0
 @export var overlap: float = 0.8
 @export var num_of_neighbours: int = 2
 @export var n_step: float = 2
-@export var life_time: float = 20.0
+
+#@export_subgroup("Children Scaling")
+#@export var max_child_scale: float = 0.8
+#@export var min_child_scale: float = 0.3
+#@export var child_overlap: float = 1.0
+#
+#@export_subgroup("Children Count")
+#@export var max_children: int = 5
+#@export var min_children: int = 0
 
 @export_group("Direction Settings")
 @export var direction_spread := Vector3(1.0, 1.0, 1.0)
@@ -118,7 +134,6 @@ func create_cloud_lines() -> void:
 	var side := 1
 	var distance := 0.0
 	var perp := Vector3(-wind.y, 0, wind.x)
-	var j := 0
 	
 	lines.clear()
 	for i in range(lines_count):
@@ -126,13 +141,6 @@ func create_cloud_lines() -> void:
 		var line_speed := randf_range(min_line_speed, max_line_speed)
 		lines.append({"id": i, "position": target, "speed": line_speed})
 		
-		if second_layer and distance != 0:
-			target = start_position + perp.normalized() * (distance - distance_between_lines / 2) * side
-			target.y += 0.866 * distance_between_lines
-			line_speed = randf_range(min_line_speed, max_line_speed)
-			lines.append({"id": lines_count + j, "position": target, "speed": line_speed})
-			j += 1
-			
 		if side == 1:
 			distance += distance_between_lines
 		side *= -1
@@ -147,7 +155,7 @@ func check_clouds_pos(cloud_name : String, new_pos : Vector3, new_R : float) -> 
 		var S : float = child.scale.x
 		var distance : float = pos.distance_to(new_pos)
 		
-		if distance < (new_R + (R * S)) * overlap:
+		if distance < (new_R + (R * S)) * overlap * overlap_threshold:
 			return false
 	return true
 
@@ -173,6 +181,74 @@ func generate_points(cloud_name : String, points : Array[Vector3], number_of_nei
 			generate_points(cloud_name, points, number_of_neighbours - n_step, new_pos)
 		else:
 			print("WARNING: a lot of attempts in generate_core func!")
+
+#func generate_core(cloud_name : String, pos : Vector3, number_of_neighbours : int, S : float):
+	#var cloud_node := get_node("CloudsContainer/%s" % cloud_name)
+	#
+	#var core := CLOUD.instantiate()
+	#cloud_node.add_child(core)
+	#core.global_position = pos
+	#core.lifetime *= S 
+	#core.owner = get_tree().edited_scene_root
+	#core.scale = Vector3(S, S, S)
+	#
+	#for i in range(number_of_neighbours):
+		#var max_attempts : int = 20
+		#var check : bool = false
+		#var R : float = core.process_material.emission_sphere_radius
+		#var new_pos : Vector3
+		#var attempt : int = 0
+		#
+		#while !check:
+			#if attempt >= max_attempts:
+				#break
+			#var random_direction := get_spread_for(false)
+			#
+			#new_pos = random_direction * ((R * core_scale * 2) * core_overlap) + core.global_position
+			#check = check_clouds_pos(cloud_name, new_pos, R * core_scale, core_overlap)
+			#attempt += 1
+		#
+		#if check:
+			#generate_core(cloud_name, new_pos, number_of_neighbours - n_step, core_scale)
+		#else:
+			#print("ERROR: a lot of attempts in generate_core func!")
+	
+#func generate_child(cloud_name : String, num_of_childs : int):
+	#var cloud_node := get_node("CloudsContainer/%s" % cloud_name)
+	#var existing_cores = cloud_node.get_children()
+	#
+	#for core in existing_cores:
+		#var pos : Vector3 = core.global_position
+		#var R : float = core.process_material.emission_sphere_radius
+		#var S : float = core.scale.x
+		#
+		#for i in range(num_of_childs):
+			#var max_attempts : int = 20
+			#var attempt : int = 0
+			#var success : bool = false
+			#
+			#var final_pos : Vector3
+			#var final_scale : float
+			#
+			#while attempt < max_attempts:
+				#var random_direction := get_spread_for(true)	
+				#var child_S = randf_range(min_child_scale, max_child_scale)
+				#var new_R = R
+				#var distance = (R * S + new_R * child_S) * child_overlap
+				#var potential_pos = pos + (random_direction * distance)
+				#
+				#if check_clouds_pos(cloud_name, potential_pos, new_R * child_S, child_overlap):
+					#final_pos = potential_pos
+					#final_scale = child_S
+					#success = true
+					#break
+				#
+				#attempt += 1
+			#
+			#if success:
+				#generate_core(cloud_name, final_pos, 0, final_scale)
+			#else:
+				#print("Could not find spot for child at core: ", core.name)			
 
 func create_emission_texture(points: Array[Vector3]) -> ImageTexture:
 	var count = points.size()
@@ -208,14 +284,6 @@ func spawn_cloud_func() -> CloudInstance:
 	clouds_container.add_child(cloud)
 	cloud.global_position = pos
 	cloud.owner = get_tree().edited_scene_root
-	cloud.lifetime = life_time
-	
-	var new_mesh = SphereMesh.new()
-	new_mesh.radius = 0.5 * cloud_scale
-	new_mesh.height = 1.0 * cloud_scale
-	new_mesh.radial_segments = 8
-	new_mesh.rings = 4
-	cloud.draw_pass_1 = new_mesh
 	
 	var points : Array[Vector3] = []
 	generate_points(cloud.name, points, num_of_neighbours)
@@ -229,40 +297,63 @@ func spawn_cloud_func() -> CloudInstance:
 	
 	return CloudInstance.new(cloud, line["speed"], end_pos)
 
-func gen_appearance():
-	cloud_scale = randf_range(4.0, 5.0)
-	overlap = randf_range(0.35, 0.5)
-	n_step = randf_range(2.3, 2.7)
-	num_of_neighbours = randi_range(6, 7)
-	direction_spread = Vector3(
-		randf_range(1.2, 1.8),
-		randf_range(0.4, 0.7),
-		randf_range(1.2, 1.8)
-	)
-	life_time = randf_range(20.0, 40.0)
-
 func erase_cloud(cloud: CloudInstance):
 	active_clouds.erase(cloud)
 	if is_instance_valid(cloud.node):
 		cloud.node.queue_free()
 
 func _process(delta: float) -> void:
-	if spawn_random:
-		spawn_timer += delta
-		if spawn_timer >= spawn_interval:
-			spawn_timer = 0.0
-			if randf() <= spawn_probability:
-				gen_appearance()
-				active_clouds.append(spawn_cloud_func())
-				
-	if move:
-		for i in range(active_clouds.size() - 1, -1, -1):
-			var cloud = active_clouds[i]
-			if cloud.node.global_position.distance_to(cloud.end_pos) <= 1.0:		
-				cloud.node.emitting = false
-				var lifetime = cloud.node.lifetime
-				get_tree().create_timer(lifetime).timeout.connect(erase_cloud.bind(cloud))
-			
-			var direction := Vector3(wind.x, 0.0, wind.y).normalized()
-			cloud.node.global_position += direction * cloud.speed * delta
+	if !spawn_and_move:
+		return 
 		
+	spawn_timer += delta
+	if spawn_timer >= spawn_interval:
+		spawn_timer = 0.0
+		if randf() <= spawn_probability:
+			active_clouds.append(spawn_cloud_func())
+			
+	for i in range(active_clouds.size() - 1, -1, -1):
+		var cloud = active_clouds[i]
+		if cloud.node.global_position.distance_to(cloud.end_pos) <= 1.0:		
+			cloud.node.emitting = false
+			var lifetime = cloud.node.lifetime
+			get_tree().create_timer(lifetime).timeout.connect(erase_cloud.bind(cloud))
+		
+		var direction := Vector3(wind.x, 0.0, wind.y).normalized()
+		cloud.node.global_position += direction * cloud.speed * delta
+		
+	
+#func generate_cloud() -> CloudInstance:
+	#lines = load_data()
+	#if lines.is_empty(): return null
+	#
+	#var line : LinesData = lines.pick_random()
+	#var pos := line.position + Vector3(-wind.x, 0.0, -wind.y).normalized() * (lines_length / 2)
+	#
+	#var new_cloud : Node3D = Node3D.new()
+	#clouds_container.add_child(new_cloud)
+	#new_cloud.owner = get_tree().edited_scene_root
+	#generate_core(new_cloud.name, pos, num_of_neighbours, core_scale)
+	#generate_child(new_cloud.name, randi_range(min_children, max_children))
+	#
+	#var instance = CloudInstance.new(new_cloud, line.speed)
+	#return instance
+
+#func _process(delta: float) -> void:
+	#if not Engine.is_editor_hint() and not auto_spawn: return
+	#if auto_spawn:
+		#spawn_timer += delta
+		#if spawn_timer >= spawn_interval:
+			#spawn_timer = 0.0
+			#if randf() <= spawn_probability:
+				#var new_inst = generate_cloud()
+				#if new_inst:
+					#active_clouds.append(new_inst)
+					#
+	#for i in range(active_clouds.size() - 1, -1, -1):
+		#var cloud = active_clouds[i]
+		#
+		#if is_instance_valid(cloud.node):
+			#cloud.node.global_position += Vector3(wind.x, 0.0, wind.y).normalized() * cloud.speed * delta
+		#else:
+			#active_clouds.remove_at(i)
