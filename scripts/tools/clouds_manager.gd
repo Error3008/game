@@ -207,7 +207,7 @@ func spawn_cloud_func() -> CloudInstance:
 	var cloud := CLOUD.instantiate()
 	clouds_container.add_child(cloud)
 	cloud.global_position = pos
-	cloud.owner = get_tree().edited_scene_root
+	#cloud.owner = get_tree().edited_scene_root
 	cloud.lifetime = life_time
 	
 	var new_mesh = SphereMesh.new()
@@ -233,7 +233,7 @@ func gen_appearance():
 	cloud_scale = randf_range(4.0, 5.0)
 	overlap = randf_range(0.35, 0.5)
 	n_step = randf_range(2.3, 2.7)
-	num_of_neighbours = randi_range(6, 7)
+	num_of_neighbours = 6
 	direction_spread = Vector3(
 		randf_range(1.2, 1.8),
 		randf_range(0.4, 0.7),
