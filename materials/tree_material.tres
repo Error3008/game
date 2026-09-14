@@ -1,0 +1,10 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://cg8dwrnldhvga"]
+
+[ext_resource type="Texture2D" uid="uid://dbt5vvxxap6x3" path="res://textures/tree_texture.png" id="1_lsu6c"]
+
+[resource]
+resource_name = "Материал"
+cull_mode = 2
+albedo_texture = ExtResource("1_lsu6c")
+roughness = 0.75272727
+texture_filter = 2

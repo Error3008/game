@@ -2,8 +2,8 @@ extends CharacterBody3D
 
 
 @export var max_speed: = 5.0
-@export var accel: = 8.0
-@export var lerp_angle_weight_scale: = 10.0
+@export var accel: = 5.0
+@export var lerp_angle_weight_scale: = 7.0
 
 @onready var pawn: Node3D = $pawn
 @onready var animation_tree: AnimationTree = $pawn/AnimationTree
