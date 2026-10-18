@@ -47,7 +47,6 @@ enum DebugMapMode {
 @export_group("3D World Settings")
 @export var generate_point : Vector2 = Vector2(0, 0)
 @export var generate_radius : int = 1
-@export var chunks_count : int = 8192
 @export var chunk_size : int = 16
 @export var cell_size : float = 1.0
 @export var height_scale : float = 100.0
@@ -93,8 +92,6 @@ enum DebugMapMode {
 # Список типов объектов для спавна (деревья, валуны, кусты, грибы и т.д.).
 # Нажми «+» в инспекторе чтобы добавить новый SpawnableItem.
 @export var spawnable_items : Array[SpawnableItem]
-## Для обратной совместимости со сценами, где использовался tree_types
-@export var tree_types : Array
 
 @export_group("Grass Generation (GPU Carpet)")
 ## Включить процедурную генерацию травяного ковра на GPU
@@ -109,26 +106,124 @@ enum DebugMapMode {
 @export var grass_max_slope : float = 38.0
 ## Шаг детализации текстуры рельефа чанка (в метрах на пиксель). По умолчанию 0.25м (64x64 пикселей для 16м чанка).
 @export var grass_texture_step : float = 0.25
+## Дистанция LOD, за которой трава не рендерится (в метрах). 0 = без ограничений.
+@export var grass_lod_distance : float = 60.0
+## Сколько чанков травы загружать на GPU за один кадр. 1 = плавнее, 2-3 = быстрее.
+@export var grass_uploads_per_frame : int = 1
+## Сколько чанков геометрии добавлять в сцену за один кадр.
+## 1 = максимально плавно, 2-3 = быстрее появление мира.
+@export var spawn_chunks_per_frame : int = 2
 
 var current_coords: Array
 
 var task_id: int = -1
 var cancel_generation: bool = false
-# Кэш заглушек-мешей: footprint_radius -> BoxMesh (создаётся по первому запросу)
+# Кэш заглушек-мешей: spacing_radius -> BoxMesh (создаётся по первому запросу)
 var _placeholder_meshes: Dictionary = {}
-# Копия spawnable_items, отсортированная по убыванию footprint_radius.
+# Копия spawnable_items, отсортированная по убыванию spacing_radius.
 # Заполняется один раз в generate_chunks() до старта потоков; потоки читают только.
 var _sorted_spawnable_items: Array = []
+# Кэшированные ресурсы травы для безопасного чтения рабочими потоками без обращений к ResourceLoader
+var _cached_grass_mesh : Mesh
+var _cached_grass_material : ShaderMaterial
 
-# Кэш единого шаблонного MultiMesh для травы на Y = 0 (делится между всеми чанками мира)
-var _shared_grass_multimesh : MultiMesh = null
-var _last_grass_density_step : float = -1.0
-var _last_grass_chunk_size : float = -1.0
-var _last_grass_mesh : Mesh = null
+# Очередь отложенной загрузки травы: каждый элемент — словарь с данными одного чанка.
+# Обрабатывается по grass_uploads_per_frame элементов за кадр в _process(),
+# чтобы связывание нод и создание текстур происходило плавно.
+var _grass_upload_queue : Array[Dictionary] = []
 
-func get_shared_grass_multimesh() -> MultiMesh:
+# Очередь отложенного добавления чанков геометрии в сцену.
+# Заполняется из фоновых потоков через _enqueue_chunk (call_deferred).
+# Обрабатывается по spawn_chunks_per_frame штук за кадр в _process().
+var _chunk_spawn_queue : Array[Dictionary] = []
+
+# task_id генерации, которую нужно дождаться перед очисткой (неблокирующий polling).
+# -1 = нет ожидающей задачи.
+var _pending_clear_task_id : int = -1
+# Если true — ждём завершения _pending_clear_task_id, затем очищаем и перегенерируем.
+var _waiting_to_clear : bool = false
+
+func _process(_delta: float) -> void:
+	# --- Неблокирующее ожидание завершения старой генерации перед очисткой ---
+	# Вместо wait_for_group_task_completion (полный фриз) проверяем готовность
+	# каждый кадр. Как только старые потоки финишировали — чистим сцену и стартуем заново.
+	if _waiting_to_clear and _pending_clear_task_id != -1:
+		if WorkerThreadPool.is_group_task_completed(_pending_clear_task_id):
+			_pending_clear_task_id = -1
+			_waiting_to_clear = false
+			_do_clear_chunks()
+			_do_start_generation()
+		return  # Пока ждём — ничего больше не трогаем
+	
+	# --- Отложенная загрузка травы на GPU (по N чанков за кадр) ---
+	# ImageTexture.create_from_image() и build_grass_multimesh() вызываются здесь,
+	# а не в spawn_chunk(), чтобы не блокировать фрейм разом для всех чанков.
+	var uploads_done := 0
+	while not _grass_upload_queue.is_empty() and uploads_done < grass_uploads_per_frame:
+		var entry : Dictionary = _grass_upload_queue.pop_front()
+		_upload_grass_chunk(entry)
+		uploads_done += 1
+
+	# --- Отложенный спавн чанков геометрии (по N за кадр) ---
+	# MeshInstance3D и MultiMeshInstance3D добавляются в сцену порционно,
+	# чтобы не создавать пик нагрузки когда весь батч потоков завершается разом.
+	var spawns_done := 0
+	while not _chunk_spawn_queue.is_empty() and spawns_done < spawn_chunks_per_frame:
+		var entry : Dictionary = _chunk_spawn_queue.pop_front()
+		spawn_chunk(entry["pos"], entry["mesh"], entry["objects"], entry["terrain"])
+		spawns_done += 1
+
+func _upload_grass_chunk(entry: Dictionary) -> void:
+	var chunk_node : MeshInstance3D = entry["chunk_node"]
+	# Нода могла быть удалена если был вызов clear во время ожидания
+	if not is_instance_valid(chunk_node) or chunk_node.is_queued_for_deletion():
+		return
+	
+	var terrain_img      : Image          = entry["terrain_img"]
+	var min_h            : float          = entry["min_h"]
+	var max_h            : float          = entry["max_h"]
+	var chunk_world_size : float          = entry["chunk_world_size"]
+	var grass_mm         : MultiMesh      = entry["grass_multimesh"]
+	var base_mat         : ShaderMaterial = entry["base_mat"]
+	var chunk_world_pos  : Vector2        = entry["chunk_world_pos"]
+	
+	var grass_mm_inst := MultiMeshInstance3D.new()
+	# MultiMesh геометрия уже полностью собрана в фоновом потоке — присваиваем мгновенно!
+	grass_mm_inst.multimesh = grass_mm
+	
+	# AABB: Y по фактическим высотам, X/Z с запасом на jitter и scale_rnd
+	var margin_below := 1.0
+	var margin_above := 2.0
+	var margin_xz    := 2.0
+	grass_mm_inst.custom_aabb = AABB(
+		Vector3(-margin_xz, min_h - margin_below, -margin_xz),
+		Vector3(
+			chunk_world_size + margin_xz * 2.0,
+			(max_h + margin_above) - (min_h - margin_below),
+			chunk_world_size + margin_xz * 2.0
+		)
+	)
+	
+	# LOD отсечение
+	if grass_lod_distance > 0.0:
+		grass_mm_inst.visibility_range_end = grass_lod_distance
+		grass_mm_inst.visibility_range_end_margin = 5.0
+	
+	if base_mat != null:
+		var mat_inst := base_mat.duplicate() as ShaderMaterial
+		var tex := ImageTexture.create_from_image(terrain_img)
+		mat_inst.set_shader_parameter("terrain_data", tex)
+		mat_inst.set_shader_parameter("chunk_size_world", chunk_world_size)
+		mat_inst.set_shader_parameter("chunk_world_pos", chunk_world_pos)
+		grass_mm_inst.material_override = mat_inst
+	
+	chunk_node.add_child(grass_mm_inst)
+
+func build_grass_multimesh(seed: int) -> MultiMesh:
 	var chunk_world_size := chunk_size * cell_size
-	var mesh_to_use : Mesh = grass_mesh
+	var mesh_to_use : Mesh = _cached_grass_mesh
+	if mesh_to_use == null:
+		mesh_to_use = grass_mesh
 	if mesh_to_use == null:
 		var default_mesh_path := "res://meshes/grass.res"
 		if ResourceLoader.exists(default_mesh_path):
@@ -137,12 +232,6 @@ func get_shared_grass_multimesh() -> MultiMesh:
 		var quad := QuadMesh.new()
 		quad.size = Vector2(0.5, 0.6)
 		mesh_to_use = quad
-	
-	if _shared_grass_multimesh != null \
-		and _last_grass_density_step == grass_density_step \
-		and _last_grass_chunk_size == chunk_world_size \
-		and _last_grass_mesh == mesh_to_use:
-		return _shared_grass_multimesh
 	
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -153,13 +242,19 @@ func get_shared_grass_multimesh() -> MultiMesh:
 	var count := steps_count * steps_count
 	mm.instance_count = count
 	
+	# PackedFloat32Array: 12 float на инстанс (матрица Transform3D = BASIS(9) + ORIGIN(3)).
+	# Собирается целиком в фоновом потоке WorkerThreadPool.
+	var buf := PackedFloat32Array()
+	buf.resize(count * 12)
+	
 	var idx := 0
 	for ix in range(steps_count):
 		for iz in range(steps_count):
 			var base_x := (float(ix) + 0.5) * step
 			var base_z := (float(iz) + 0.5) * step
 			
-			var h := get_cell_hash(ix, iz, 55555)
+			# Сид зависит от координат чанка: распределение травы уникально
+			var h := get_cell_hash(ix, iz, seed)
 			var jitter_x := (hash_to_float(h, 0) * 2.0 - 1.0) * (step * 0.4)
 			var jitter_z := (hash_to_float(h, 1) * 2.0 - 1.0) * (step * 0.4)
 			var rot_y := hash_to_float(h, 2) * TAU
@@ -168,36 +263,44 @@ func get_shared_grass_multimesh() -> MultiMesh:
 			var x := clampf(base_x + jitter_x, 0.0, chunk_world_size)
 			var z := clampf(base_z + jitter_z, 0.0, chunk_world_size)
 			
-			var t := Transform3D()
-			# Масштабируем по X и Z для вариативности кустиков, Y масштабируется шейдером по маске
-			t = t.scaled(Vector3(scale_rnd, 1.0, scale_rnd))
-			t = t.rotated(Vector3.UP, rot_y)
-			t.origin = Vector3(x, 0.0, z)
+			# Строим матрицу Transform3D вручную: поворот Y * масштаб XZ
+			var cos_r := cos(rot_y)
+			var sin_r := sin(rot_y)
+			var base_offset := idx * 12
 			
-			mm.set_instance_transform(idx, t)
+			# Строка 0: X-координаты базиса + Origin.x
+			buf[base_offset + 0] = cos_r * scale_rnd  # X.x
+			buf[base_offset + 1] = 0.0                # Y.x
+			buf[base_offset + 2] = sin_r * scale_rnd  # Z.x
+			buf[base_offset + 3] = x                  # Позиция X
+			
+			# Строка 1: Y-координаты базиса + Origin.y
+			buf[base_offset + 4] = 0.0                # X.y
+			buf[base_offset + 5] = 1.0                # Y.y
+			buf[base_offset + 6] = 0.0                # Z.y
+			buf[base_offset + 7] = 0.0                # Позиция Y (шейдер сам поднимет)
+			
+			# Строка 2: Z-координаты базиса + Origin.z
+			buf[base_offset + 8] = -sin_r * scale_rnd # X.z
+			buf[base_offset + 9] = 0.0                # Y.z
+			buf[base_offset + 10] = cos_r * scale_rnd # Z.z
+			buf[base_offset + 11] = z                 # Позиция Z
+			
 			idx += 1
-			
-	_shared_grass_multimesh = mm
-	_last_grass_density_step = grass_density_step
-	_last_grass_chunk_size = chunk_world_size
-	_last_grass_mesh = mesh_to_use
+	
+	mm.buffer = buf
 	return mm
 
 
 func get_placeholder_mesh(item: SpawnableItem) -> Mesh:
-	# Заглушки кэшируются по footprint_radius — каждый уникальный размер создаётся один раз.
-	var key := item.footprint_radius
+	# Заглушки кэшируются по spacing_radius — каждый уникальный размер создаётся один раз.
+	var key := item.spacing_radius
 	if _placeholder_meshes.has(key):
 		return _placeholder_meshes[key]
 	
-	# =========================================================================
-	# ЗАТЫЧКА ДЛЯ ОБЪЕКТА:
-	# Пропорциональный прямоугольник с коричневым материалом.
-	# Размеры выводятся из footprint_radius типа объекта.
-	# Когда появится готовая 3D-модель: задай её в поле mesh у SpawnableItem.
-	# =========================================================================
-	var width := item.footprint_radius * 0.4
-	var height := item.footprint_radius * 1.2
+	# Пропорциональный прямоугольник с коричневым материалом
+	var width := item.spacing_radius * 0.4
+	var height := item.spacing_radius * 1.2
 	
 	var box := BoxMesh.new()
 	box.size = Vector3(width, height, width)
@@ -238,6 +341,22 @@ func get_spawn_weight_for_item(item: SpawnableItem, pos: Vector2) -> float:
 
 func get_micro_height(pos : Vector2) -> float:
 	return micro_noise.get_noise_2dv(pos)
+
+## Билинейная интерполяция значения из кэша высот чанка.
+## local_x / local_z — координаты в локальном пространстве чанка (0 .. chunk_size * cell_size).
+## gs — grid_size (chunk_size + 1).
+func _bilerp_cache(cache: Array[float], local_x: float, local_z: float, gs: int) -> float:
+	var fx := local_x / cell_size
+	var fz := local_z / cell_size
+	var xi := clampi(floori(fx), 0, gs - 2)
+	var zi := clampi(floori(fz), 0, gs - 2)
+	var tx := clampf(fx - float(xi), 0.0, 1.0)
+	var tz := clampf(fz - float(zi), 0.0, 1.0)
+	var h00 := cache[xi * gs + zi]
+	var h10 := cache[(xi + 1) * gs + zi]
+	var h01 := cache[xi * gs + (zi + 1)]
+	var h11 := cache[(xi + 1) * gs + (zi + 1)]
+	return lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
 
 
 func get_hills_weight(pos : Vector2) -> float:
@@ -291,9 +410,6 @@ func get_point_height(pos : Vector2) -> float:
 	
 	var blended_relief := (w_plains * plains_relief) + (w_hills * hills_relief)
 	return base_val + blended_relief
-
-func get_point_info(pos : Vector2) -> float:
-	return get_point_height(pos)
 
 func get_point_color(pos : Vector2, height : float) -> Color:
 	# Океан
@@ -456,11 +572,27 @@ func get_chunk_coords_in_radius(center: Vector2, radius: int) -> Array[Vector2]:
 	return chunks
 
 func clear_generated_chunks():
-	if task_id != -1:
-		cancel_generation = true
-		WorkerThreadPool.wait_for_group_task_completion(task_id)
-		task_id = -1
+	# Сигнализируем потокам остановиться
+	cancel_generation = true
+	# Сбрасываем очереди — данные от старой генерации больше не нужны
+	_grass_upload_queue.clear()
+	_chunk_spawn_queue.clear()
 	
+	if task_id != -1:
+		if WorkerThreadPool.is_group_task_completed(task_id):
+			# Потоки уже завершились — чистим немедленно
+			task_id = -1
+			_do_clear_chunks()
+		else:
+			# Потоки ещё работают — запоминаем id и ждём в _process без блокировки
+			_pending_clear_task_id = task_id
+			task_id = -1
+			_waiting_to_clear = true
+	else:
+		_do_clear_chunks()
+
+func _do_clear_chunks() -> void:
+	# Фактическое удаление чанков — вызывается только когда потоки точно завершены
 	var removed := 0
 	for child in get_children():
 		if child is MeshInstance3D:
@@ -469,25 +601,19 @@ func clear_generated_chunks():
 	print("Cleared generated chunks: ", removed)
 
 func generate_chunks():
-	clear_generated_chunks()
-	
-	# Подготовка и сортировка объектов по убыванию footprint_radius (крупные первыми)
+	# Подготовка списка объектов (потокобезопасно читается потоками)
 	_sorted_spawnable_items = []
 	if spawnable_items != null:
 		for it in spawnable_items:
 			if it != null:
 				_sorted_spawnable_items.append(it)
-	# Поддержка объектов из ранее настроенных сцен (tree_types)
-	if tree_types != null:
-		for it in tree_types:
-			if it != null and not _sorted_spawnable_items.has(it):
-				_sorted_spawnable_items.append(it)
-	
-	# Если список пуст — создаём дефолтный тип-заглушку для работы "из коробки"
+
+	# Если список пуст — создаём дефолтный тип-заглушку для работы «из коробки»
 	if _sorted_spawnable_items.is_empty():
 		var default_item := SpawnableItem.new()
 		default_item.name = "Default Tree"
-		default_item.footprint_radius = 2.5
+		default_item.spacing_radius = 2.5
+		default_item.trunk_radius = 0.5
 		default_item.density_multiplier = 0.85
 		default_item.scale_min = 0.8
 		default_item.scale_max = 1.3
@@ -497,8 +623,43 @@ func generate_chunks():
 		default_item.is_obstacle = true
 		_sorted_spawnable_items.append(default_item)
 	else:
-		_sorted_spawnable_items.sort_custom(func(a: SpawnableItem, b: SpawnableItem): return a.footprint_radius > b.footprint_radius)
+		_sorted_spawnable_items.sort_custom(func(a: SpawnableItem, b: SpawnableItem): return a.spacing_radius > b.spacing_radius)
 	
+	# Предзагрузка заглушек для потокобезопасного доступа в WorkerThreadPool
+	for it in _sorted_spawnable_items:
+		if it.mesh == null:
+			get_placeholder_mesh(it)
+			
+	# Предзагрузка ресурсов травы в основном потоке для исключения обращений к ResourceLoader из фоновых потоков
+	_cached_grass_mesh = grass_mesh
+	if _cached_grass_mesh == null:
+		var default_mesh_path := "res://meshes/grass.res"
+		if ResourceLoader.exists(default_mesh_path):
+			_cached_grass_mesh = load(default_mesh_path)
+	if _cached_grass_mesh == null:
+		var quad := QuadMesh.new()
+		quad.size = Vector2(0.5, 0.6)
+		_cached_grass_mesh = quad
+		
+	_cached_grass_material = grass_material
+	if _cached_grass_material == null:
+		var default_mat_path := "res://materials/grass_material.tres"
+		if ResourceLoader.exists(default_mat_path):
+			_cached_grass_material = load(default_mat_path)
+	
+	# Сначала очищаем старые чанки (возможно асинхронно), потом стартуем
+	if task_id != -1:
+		# Старая генерация ещё идёт — откладываем, _process запустит после завершения
+		cancel_generation = true
+		_grass_upload_queue.clear()
+		_pending_clear_task_id = task_id
+		task_id = -1
+		_waiting_to_clear = true
+	else:
+		_do_clear_chunks()
+		_do_start_generation()
+
+func _do_start_generation() -> void:
 	var pos_of_chunk := get_chunk_coords(generate_point)
 	current_coords = get_chunk_coords_in_radius(pos_of_chunk, generate_radius)
 	global_position = Vector3(-generate_point.x, 0, -generate_point.y)
@@ -506,93 +667,134 @@ func generate_chunks():
 	cancel_generation = false
 	task_id = WorkerThreadPool.add_group_task(generate_single_chunk, current_coords.size())
 
-func generate_chunk_terrain_image(c : Vector2, local_obstacles : Array) -> Image:
+## heights_cache — финальные высоты (h*scale + micro), raw_h_cache — «сырые» (до scale, для water_level).
+## Оба кэша имеют размер grid_size*grid_size, где grid_size = chunk_size + 1.
+func generate_chunk_terrain_image(c : Vector2, local_obstacles : Array,
+		heights_cache : Array[float], raw_h_cache : Array[float], cache_gs : int) -> Dictionary:
 	var chunk_world_size := chunk_size * cell_size
 	var chunk_world_min_x := c.x * chunk_world_size
 	var chunk_world_min_z := c.y * chunk_world_size
-	
+
 	var step := maxf(0.05, grass_texture_step)
 	var tex_size := clampi(int(round(chunk_world_size / step)), 16, 256)
-	
+
 	var img := Image.create(tex_size, tex_size, false, Image.FORMAT_RGF)
-	
-	# 1. Заполняем рельеф и базовую маску уклона/воды
+
+	# Диапазон фактических высот рельефа чанка — нужен для плотного
+	# custom_aabb травы (см. spawn_chunk)
+	var min_h := INF
+	var max_h := -INF
+
+	# slope_step в локальных единицах чанка (0.5 м, как было раньше)
+	var slope_step := 0.5
+
+	# 1. Заполняем рельеф и базовую маску уклона/воды.
+	# Высоты берём из кэша через билинейную интерполяцию —
+	# get_point_height() и get_micro_height() больше не вызываются.
 	for px in range(tex_size):
 		for py in range(tex_size):
-			var u := (float(px) + 0.5) / float(tex_size)
-			var v := (float(py) + 0.5) / float(tex_size)
-			var world_x := chunk_world_min_x + u * chunk_world_size
-			var world_z := chunk_world_min_z + v * chunk_world_size
-			var pos2d := Vector2(world_x, world_z)
-			
-			var h := get_point_height(pos2d)
-			var world_y := h * height_scale + get_micro_height(pos2d)
-			
+			# Edge-aligned UV: первый пиксель строго на u=0.0, последний на u=1.0.
+			# Устраняет half-texel смещение, из-за которого края чанка читали
+			# шейдером смещённые высоты и маски.
+			var u := float(px) / float(tex_size - 1)
+			var v := float(py) / float(tex_size - 1)
+			var local_x := u * chunk_world_size
+			var local_z := v * chunk_world_size
+
+			# Финальная высота (с масштабом и микрорельефом) из кэша
+			var world_y := _bilerp_cache(heights_cache, local_x, local_z, cache_gs)
+			# Сырая высота для проверки water_level
+			var raw := _bilerp_cache(raw_h_cache, local_x, local_z, cache_gs)
+
+			if world_y < min_h:
+				min_h = world_y
+			if world_y > max_h:
+				max_h = world_y
+
 			var mask := 1.0
-			if h <= water_level:
+			if raw <= water_level:
 				mask = 0.0
 			else:
-				var slope_step := 0.5
-				var h_dx := (get_point_height(Vector2(world_x + slope_step, world_z)) - get_point_height(Vector2(world_x - slope_step, world_z))) / (2.0 * slope_step) * height_scale
-				var h_dz := (get_point_height(Vector2(world_x, world_z + slope_step)) - get_point_height(Vector2(world_x, world_z - slope_step))) / (2.0 * slope_step) * height_scale
+				# Уклон через конечные разности из кэша — без вызова шумов
+				var h_dx := (_bilerp_cache(heights_cache, local_x + slope_step, local_z, cache_gs)
+						   - _bilerp_cache(heights_cache, local_x - slope_step, local_z, cache_gs)) \
+						   / (2.0 * slope_step)
+				var h_dz := (_bilerp_cache(heights_cache, local_x, local_z + slope_step, cache_gs)
+						   - _bilerp_cache(heights_cache, local_x, local_z - slope_step, cache_gs)) \
+						   / (2.0 * slope_step)
 				var slope_deg := rad_to_deg(atan(sqrt(h_dx * h_dx + h_dz * h_dz)))
 				mask = clampf(1.0 - smoothstep(grass_max_slope - 6.0, grass_max_slope, slope_deg), 0.0, 1.0)
-			
+
 			img.set_pixel(px, py, Color(world_y, mask, 0.0, 1.0))
-			
-	# 2. Штампуем препятствия (деревья, валуны) в маску травы с плавным затуханием
+
+	# 2. Штампуем препятствия (деревья, валуны) в маску травы с плавным затуханием.
+	# Координаты пикселей согласованы с edge-aligned UV (tex_size - 1), без half-texel сдвига.
+	var tex_coord_scale := float(tex_size - 1) / chunk_world_size
 	for obs in local_obstacles:
 		var obs_x : float = obs.x
 		var obs_z : float = obs.y
 		var obs_radius : float = obs.z
-		
-		var center_px := ((obs_x - chunk_world_min_x) / chunk_world_size) * float(tex_size)
-		var center_py := ((obs_z - chunk_world_min_z) / chunk_world_size) * float(tex_size)
-		var r_px := (obs_radius / chunk_world_size) * float(tex_size)
-		
+
+		var center_px := (obs_x - chunk_world_min_x) * tex_coord_scale
+		var center_py := (obs_z - chunk_world_min_z) * tex_coord_scale
+		var r_px := obs_radius * tex_coord_scale
+
 		var min_px := clampi(int(floor(center_px - r_px - 1.0)), 0, tex_size - 1)
 		var max_px := clampi(int(ceil(center_px + r_px + 1.0)), 0, tex_size - 1)
 		var min_py := clampi(int(floor(center_py - r_px - 1.0)), 0, tex_size - 1)
 		var max_py := clampi(int(ceil(center_py + r_px + 1.0)), 0, tex_size - 1)
-		
-		var inner_r_px := r_px * 0.7
-		
+
+		var inner_r_px := r_px * 0.6
+
 		for px in range(min_px, max_px + 1):
 			for py in range(min_py, max_py + 1):
-				var dx := float(px) + 0.5 - center_px
-				var dy := float(py) + 0.5 - center_py
+				var dx := float(px) - center_px
+				var dy := float(py) - center_py
 				var dist := sqrt(dx * dx + dy * dy)
-				
+
 				if dist < r_px:
 					var fade := clampf((dist - inner_r_px) / maxf(0.001, r_px - inner_r_px), 0.0, 1.0)
 					var col := img.get_pixel(px, py)
 					img.set_pixel(px, py, Color(col.r, col.g * fade, 0.0, 1.0))
-					
-	return img
+
+	return {
+		"image": img,
+		"min_height": min_h if min_h != INF else 0.0,
+		"max_height": max_h if max_h != -INF else 0.0,
+	}
 
 func generate_grid_objects(c : Vector2) -> Dictionary:
 	var result: Array = []
 	
-	var chunk_world_min_x := c.x * chunk_size * cell_size
-	var chunk_world_max_x := (c.x + 1) * chunk_size * cell_size
-	var chunk_world_min_z := c.y * chunk_size * cell_size
-	var chunk_world_max_z := (c.y + 1) * chunk_size * cell_size
+	var chunk_world_size := chunk_size * cell_size
+	var chunk_world_min_x := c.x * chunk_world_size
+	var chunk_world_max_x := (c.x + 1) * chunk_world_size
+	var chunk_world_min_z := c.y * chunk_world_size
+	var chunk_world_max_z := (c.y + 1) * chunk_world_size
 	
-	# Локальный массив препятствий для этого чанка: Vector3(x, z, footprint_radius).
-	# Хранит все уже успешно размещённые объекты чанка.
-	# Позволяет выполнять мгновенную проверку коллизий в кэше CPU без единого повторного вызова шума!
-	var local_obstacles: Array[Vector3] = []
+	# Кандидаты объектов, прошедшие проверку в зоне выборки чанка (включая halo).
+	# Используются для детерминированной проверки коллизий между объектами без швов.
+	var placed_candidates: Array[Dictionary] = []
+	# Препятствия для маски травы: Vector3(x, z, trunk_radius * scale).
+	# Включают деревья из halo-зоны соседей, чьи стволы перекрывают край текущего чанка.
+	var grass_obstacles: Array[Vector3] = []
 	
 	for ti in range(_sorted_spawnable_items.size()):
 		var item : SpawnableItem = _sorted_spawnable_items[ti]
 		var type_seed := spawn_seed + ti
-		var type_cell_size := item.footprint_radius * 2.0
-		var max_offset := item.footprint_radius * 0.72
+		var type_spacing := item.spacing_radius
+		var type_trunk := item.trunk_radius
+		var type_cell_size := type_spacing * 2.0
+		var max_offset := type_spacing * 0.72
 		
-		var min_cx := floori(chunk_world_min_x / type_cell_size)
-		var max_cx := floori(chunk_world_max_x / type_cell_size)
-		var min_cz := floori(chunk_world_min_z / type_cell_size)
-		var max_cz := floori(chunk_world_max_z / type_cell_size)
+		# Динамический радиус охвата за пределы границ чанка:
+		# Учитывает максимальное смещение и радиус влияния (коллизия крон / ствол).
+		# Гарантирует покрытие при любых нестандартных радиусах объектов.
+		var max_reach := max_offset + maxf(type_spacing, type_trunk)
+		var min_cx := floori((chunk_world_min_x - max_reach) / type_cell_size)
+		var max_cx := ceili((chunk_world_max_x + max_reach) / type_cell_size)
+		var min_cz := floori((chunk_world_min_z - max_reach) / type_cell_size)
+		var max_cz := ceili((chunk_world_max_z + max_reach) / type_cell_size)
 		
 		var transforms: Array[Transform3D] = []
 		
@@ -601,25 +803,18 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 				var center_x := (float(cx) + 0.5) * type_cell_size
 				var center_z := (float(cz) + 0.5) * type_cell_size
 				
-				# Чанк обрабатывает только те ячейки, чей центр попадает строго в его границы.
-				# Это предотвращает дублирование объектов на стыках соседних чанков.
-				if center_x < chunk_world_min_x or center_x >= chunk_world_max_x:
-					continue
-				if center_z < chunk_world_min_z or center_z >= chunk_world_max_z:
-					continue
-				
-				# 1. Проверка маски спавна (собственный шум объекта или лесной покров по умолчанию)
+				# 1. Проверка маски спавна (собственный шум или лесной покров)
 				var spawn_weight := get_spawn_weight_for_item(item, Vector2(center_x, center_z))
 				if spawn_weight <= 0.05:
 					continue
 				
-				# 2. Детерминированный хэш и бросок вероятности появления
+				# 2. Детерминированный хэш ячейки
 				var h := get_cell_hash(cx, cz, type_seed)
 				var spawn_roll := hash_to_float(h, 0)
 				if spawn_roll > (spawn_weight * item.density_multiplier):
 					continue
 				
-				# 3. Случайное смещение (jitter) строго в пределах ячейки
+				# 3. Случайное смещение внутри ячейки (БЕЗ clampf — устраняет просеки)
 				var offset_x_pos := (hash_to_float(h, 1) * 2.0 - 1.0) * max_offset
 				var offset_z_pos := (hash_to_float(h, 2) * 2.0 - 1.0) * max_offset
 				var world_x := center_x + offset_x_pos
@@ -627,12 +822,10 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 				
 				var pos2d := Vector2(world_x, world_z)
 				var h_center := get_point_height(pos2d)
-				
-				# Объекты не растут под водой
 				if h_center <= water_level:
 					continue
 				
-				# 4. Индивидуальная проверка крутизны склона (если включена)
+				# 4. Проверка крутизны склона
 				if item.check_slope:
 					var step := 0.5
 					var h_dx := (get_point_height(Vector2(world_x + step, world_z)) - get_point_height(Vector2(world_x - step, world_z))) / (2.0 * step) * height_scale
@@ -642,186 +835,303 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 					if slope_deg > item.max_slope:
 						continue
 				
-				# 5. Быстрая проверка коллизий по локальному массиву без обращения к шуму!
-				if item.check_collisions and not local_obstacles.is_empty():
+				var rot_y := hash_to_float(h, 3) * TAU
+				var scale_factor := lerpf(item.scale_min, item.scale_max, hash_to_float(h, 4))
+				var eff_spacing := type_spacing * scale_factor
+				var eff_trunk := type_trunk * scale_factor
+				
+				# 5. Проверка коллизий с разделением радиусов (крона vs ствол vs детали)
+				if item.check_collisions and not placed_candidates.is_empty():
 					var collided := false
-					var r_item := item.footprint_radius
-					for obs in local_obstacles:
-						var dx := world_x - obs.x
-						var dz := world_z - obs.y
-						var min_dist := r_item + obs.z
-						if (dx * dx + dz * dz) < (min_dist * min_dist):
+					for obs in placed_candidates:
+						var dx : float = world_x - obs["x"]
+						var dz : float = world_z - obs["z"]
+						var dist_sq := dx * dx + dz * dz
+						
+						var min_dist : float = 0.0
+						if obs["is_obstacle"]:
+							if item.collide_only_with_trunks or not item.is_obstacle:
+								# Мелкие детали (камни/кусты/грибы) проверяют коллизию только со стволом дерева!
+								min_dist = eff_spacing + obs["trunk_radius"]
+							else:
+								# Дерево против дерева — дистанция крон
+								min_dist = eff_spacing + obs["spacing_radius"]
+						else:
+							if item.collide_only_with_trunks:
+								continue
+							else:
+								min_dist = eff_spacing + obs["spacing_radius"]
+						
+						if dist_sq < (min_dist * min_dist):
 							collided = true
 							break
 					if collided:
 						continue
 				
-				# Если объект является препятствием — заносим его в массив для последующих объектов
+				# Регистрируем успешного кандидата в общем пуле
+				placed_candidates.append({
+					"x": world_x,
+					"z": world_z,
+					"spacing_radius": eff_spacing,
+					"trunk_radius": eff_trunk,
+					"is_obstacle": item.is_obstacle,
+				})
+				
+				# Добавляем в маску травы, если ствол касается территории чанка
 				if item.is_obstacle:
-					local_obstacles.append(Vector3(world_x, world_z, item.footprint_radius))
+					if (world_x >= chunk_world_min_x - eff_trunk and world_x <= chunk_world_max_x + eff_trunk and
+						world_z >= chunk_world_min_z - eff_trunk and world_z <= chunk_world_max_z + eff_trunk):
+						grass_obstacles.append(Vector3(world_x, world_z, eff_trunk))
 				
-				# 6. Высота точки посадки с учетом микрорельефа
+				# 6. Строгое правило владения: в 3D-модель чанка объект попадает ТОЛЬКО если его центр внутри чанка
+				var is_inside_chunk := (
+					world_x >= chunk_world_min_x and world_x < chunk_world_max_x and
+					world_z >= chunk_world_min_z and world_z < chunk_world_max_z
+				)
+				if not is_inside_chunk:
+					continue
+				
 				var world_y := h_center * height_scale + get_micro_height(pos2d)
-				
-				# 7. Случайный поворот вокруг оси Y и вариация масштаба
-				var rot_y := hash_to_float(h, 3) * TAU
-				var scale_factor := lerpf(item.scale_min, item.scale_max, hash_to_float(h, 4))
-				
-				# Локальная позиция объекта внутри чанка
 				var local_pos := Vector3(
 					world_x - chunk_world_min_x,
 					world_y,
 					world_z - chunk_world_min_z
 				)
-				
-				# Корректировка опоры для затычки (BoxMesh)
 				if item.mesh == null:
-					var trunk_height := item.footprint_radius * 1.2
+					var trunk_height := type_spacing * 1.2
 					local_pos.y += (trunk_height * 0.5) * scale_factor
 				
 				var t := Transform3D()
 				t = t.scaled(Vector3(scale_factor, scale_factor, scale_factor))
 				t = t.rotated(Vector3.UP, rot_y)
 				t.origin = local_pos
-				
 				transforms.append(t)
 		
 		if not transforms.is_empty():
+			# Собираем MultiMesh полностью в фоновом потоке!
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.instance_count = transforms.size()
+			if item.mesh != null:
+				mm.mesh = item.mesh
+			else:
+				mm.mesh = get_placeholder_mesh(item)
+			
+			var buf := PackedFloat32Array()
+			buf.resize(transforms.size() * 12)
+			for i in range(transforms.size()):
+				var t : Transform3D = transforms[i]
+				var base_off := i * 12
+				buf[base_off + 0] = t.basis.x.x
+				buf[base_off + 1] = t.basis.y.x
+				buf[base_off + 2] = t.basis.z.x
+				buf[base_off + 3] = t.origin.x
+				
+				buf[base_off + 4] = t.basis.x.y
+				buf[base_off + 5] = t.basis.y.y
+				buf[base_off + 6] = t.basis.z.y
+				buf[base_off + 7] = t.origin.y
+				
+				buf[base_off + 8] = t.basis.x.z
+				buf[base_off + 9] = t.basis.y.z
+				buf[base_off + 10] = t.basis.z.z
+				buf[base_off + 11] = t.origin.z
+			mm.buffer = buf
+			
 			result.append({
 				"item": item,
-				"transforms": transforms
+				"multimesh": mm
 			})
-			
+	
 	return {
 		"objects": result,
-		"obstacles": local_obstacles
+		"grass_obstacles": grass_obstacles
 	}
 
 func generate_single_chunk(index : int):
 	if cancel_generation:
 		return
-	
+
 	var c : Vector2 = current_coords[index]
-	
-	var st = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	
-	var chunk_noise_x := chunk_size * cell_size * c.x
-	var chunk_noise_z := chunk_size * cell_size * c.y
-	
+
+	var chunk_world_size := chunk_size * cell_size
+	var chunk_noise_x := chunk_world_size * c.x
+	var chunk_noise_z := chunk_world_size * c.y
+
+	# --- Кэш высот и цветов (grid_size × grid_size = (chunk_size+1)²) ---
+	var grid_size := chunk_size + 1
+	var heights   : Array[float] = []
+	var raw_h     : Array[float] = []
+	var colors    : Array[Color] = []
+	heights.resize(grid_size * grid_size)
+	raw_h.resize(grid_size * grid_size)
+	colors.resize(grid_size * grid_size)
+
+	for xi in range(grid_size):
+		for zi in range(grid_size):
+			var pos := Vector2(chunk_noise_x + xi * cell_size, chunk_noise_z + zi * cell_size)
+			var h   := get_point_height(pos)
+			raw_h[xi * grid_size + zi]   = h
+			heights[xi * grid_size + zi] = h * height_scale + get_micro_height(pos)
+			colors[xi * grid_size + zi]  = get_point_color(pos, h)
+
+	# --- Индексированный меш: (chunk_size+1)² вершин, chunk_size²×6 индексов ---
+	# Вместо SurfaceTool: прямая сборка PackedArrays + ArrayMesh.add_surface_from_arrays().
+	# Количество вершин: 289 vs 1536 при chunk_size=16 — меньше данных на GPU.
+	var vert_count  := grid_size * grid_size
+	var index_count := chunk_size * chunk_size * 6
+
+	var verts         := PackedVector3Array()
+	var vertex_colors := PackedColorArray()
+	var ind_arr       := PackedInt32Array()
+	# Накопитель ненормированных нормалей — суммируем со всех треугольников
+	var normals_accum : Array[Vector3] = []
+
+	verts.resize(vert_count)
+	vertex_colors.resize(vert_count)
+	ind_arr.resize(index_count)
+	normals_accum.resize(vert_count)
+
+	for i in range(vert_count):
+		normals_accum[i] = Vector3.ZERO
+
+	# Заполняем позиции и цвета вершин
+	for xi in range(grid_size):
+		for zi in range(grid_size):
+			var i := xi * grid_size + zi
+			verts[i]         = Vector3(xi * cell_size, heights[i], zi * cell_size)
+			vertex_colors[i] = colors[i]
+
+	# Строим индексы и накапливаем взвешенные нормали
+	var ind_idx := 0
 	for x in range(chunk_size):
 		for z in range(chunk_size):
-			var pos00 := Vector2(chunk_noise_x + x * cell_size, chunk_noise_z + z * cell_size)
-			var h00 := get_point_height(pos00)
-			var p00 := Vector3(x * cell_size, h00 * height_scale + get_micro_height(pos00), z * cell_size)
-			var c00 := get_point_color(pos00, h00)
+			var i00 := x       * grid_size + z
+			var i01 := x       * grid_size + (z + 1)
+			var i10 := (x + 1) * grid_size + z
+			var i11 := (x + 1) * grid_size + (z + 1)
 
-			var pos01 := Vector2(chunk_noise_x + x * cell_size, chunk_noise_z + (z + 1) * cell_size)
-			var h01 := get_point_height(pos01)
-			var p01 := Vector3(x * cell_size, h01 * height_scale + get_micro_height(pos01), (z + 1) * cell_size)
-			var c01 := get_point_color(pos01, h01)
+			var p00 := verts[i00]
+			var p01 := verts[i01]
+			var p10 := verts[i10]
+			var p11 := verts[i11]
 
-			var pos10 := Vector2(chunk_noise_x + (x + 1) * cell_size, chunk_noise_z + z * cell_size)
-			var h10 := get_point_height(pos10)
-			var p10 := Vector3((x + 1) * cell_size, h10 * height_scale + get_micro_height(pos10), z * cell_size)
-			var c10 := get_point_color(pos10, h10)
+			# Треугольник 1: i00 → i10 → i01
+			var n1 := (p01 - p00).cross(p10 - p00)
+			normals_accum[i00] += n1
+			normals_accum[i10] += n1
+			normals_accum[i01] += n1
+			ind_arr[ind_idx]     = i00
+			ind_arr[ind_idx + 1] = i10
+			ind_arr[ind_idx + 2] = i01
 
-			var pos11 := Vector2(chunk_noise_x + (x + 1) * cell_size, chunk_noise_z + (z + 1) * cell_size)
-			var h11 := get_point_height(pos11)
-			var p11 := Vector3((x + 1) * cell_size, h11 * height_scale + get_micro_height(pos11), (z + 1) * cell_size)
-			var c11 := get_point_color(pos11, h11)
-			
-			var color_tri1 = (c00 + c10 + c01) / 3.0
-			var n1 = (p01 - p00).cross(p10 - p00).normalized()
-			st.set_normal(n1); st.set_color(color_tri1); st.add_vertex(p00)
-			st.set_normal(n1); st.set_color(color_tri1); st.add_vertex(p10)
-			st.set_normal(n1); st.set_color(color_tri1); st.add_vertex(p01)
+			# Треугольник 2: i10 → i11 → i01
+			var n2 := (p01 - p10).cross(p11 - p10)
+			normals_accum[i10] += n2
+			normals_accum[i11] += n2
+			normals_accum[i01] += n2
+			ind_arr[ind_idx + 3] = i10
+			ind_arr[ind_idx + 4] = i11
+			ind_arr[ind_idx + 5] = i01
 
-			var color_tri2 = (c10 + c11 + c01) / 3.0
-			var n2 = (p01 - p10).cross(p11 - p10).normalized()
-			st.set_normal(n2); st.set_color(color_tri2); st.add_vertex(p10)
-			st.set_normal(n2); st.set_color(color_tri2); st.add_vertex(p11)
-			st.set_normal(n2); st.set_color(color_tri2); st.add_vertex(p01)
-			
-	var mesh := st.commit()
+			ind_idx += 6
+
+	# Нормализуем накопленные нормали
+	var normals_packed := PackedVector3Array()
+	normals_packed.resize(vert_count)
+	for i in range(vert_count):
+		normals_packed[i] = normals_accum[i].normalized()
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals_packed
+	arrays[Mesh.ARRAY_COLOR]  = vertex_colors
+	arrays[Mesh.ARRAY_INDEX]  = ind_arr
+
+	var chunk_mesh := ArrayMesh.new()
+	chunk_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
 	var grid_data := generate_grid_objects(c)
 	var chunk_objects : Array = grid_data["objects"]
-	var local_obstacles : Array = grid_data["obstacles"]
-	
-	var terrain_img : Image = null
-	if enable_grass:
-		terrain_img = generate_chunk_terrain_image(c, local_obstacles)
-		
-	call_deferred("spawn_chunk", c, mesh, chunk_objects, terrain_img)
+	var grass_obstacles : Array = grid_data["grass_obstacles"]
 
-func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : Array = [], terrain_img : Image = null) -> void:
+	var terrain_data : Dictionary = {}
+	if enable_grass:
+		# Передаём уже построенные кэши — generate_chunk_terrain_image
+		# больше не вызывает шумы повторно для тех же точек.
+		terrain_data = generate_chunk_terrain_image(c, grass_obstacles, heights, raw_h, grid_size)
+		var chunk_seed := get_cell_hash(int(c.x), int(c.y), spawn_seed)
+		terrain_data["multimesh"] = build_grass_multimesh(chunk_seed)
+
+	# Передаём данные в главный поток через очередь — _process контролирует темп.
+	call_deferred("_enqueue_chunk", c, chunk_mesh, chunk_objects, terrain_data)
+
+## Вызывается через call_deferred из фонового потока.
+## Кладёт готовые данные чанка в очередь; _process добавит ноду в сцену в нужный кадр.
+func _enqueue_chunk(pos_of_chunk: Vector2, mesh_data: ArrayMesh, chunk_objects: Array, terrain_data: Dictionary) -> void:
+	_chunk_spawn_queue.push_back({
+		"pos":     pos_of_chunk,
+		"mesh":    mesh_data,
+		"objects": chunk_objects,
+		"terrain": terrain_data,
+	})
+
+func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : Array = [], terrain_data : Dictionary = {}) -> void:
 	var chunk_node = MeshInstance3D.new()
 	chunk_node.mesh = mesh_data
 	
 	var mat = StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.vertex_color_is_srgb = true
-
 	chunk_node.material_override = mat
 	
 	# =========================================================================
 	# СПАВН ОБЪЕКТОВ ЧЕРЕЗ MULTIMESH
-	# Для каждого активного типа объекта создаётся отдельный MultiMeshInstance3D.
-	# Все объекты одного типа рендерятся за 1 GPU draw call с максимальным FPS.
+	# MultiMesh полностью собран в фоновом потоке generate_single_chunk.
+	# Здесь только связываем ресурс с MultiMeshInstance3D без фризов в кадре.
 	# =========================================================================
 	for entry in chunk_objects:
-		var item : SpawnableItem = entry["item"]
-		var transforms : Array = entry["transforms"]
-		if transforms.is_empty():
+		var mm : MultiMesh = entry.get("multimesh", null)
+		if mm == null:
 			continue
-		
 		var mm_inst := MultiMeshInstance3D.new()
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.instance_count = transforms.size()
-		
-		# Если mesh задан в SpawnableItem — используем реальную 3D-модель,
-		# иначе процедурную заглушку (BoxMesh).
-		if item.mesh != null:
-			mm.mesh = item.mesh
-		else:
-			mm.mesh = get_placeholder_mesh(item)
-		
-		for i in range(transforms.size()):
-			mm.set_instance_transform(i, transforms[i])
-		
 		mm_inst.multimesh = mm
 		chunk_node.add_child(mm_inst)
 	
 	# =========================================================================
-	# СПАВН ТРАВЫ ЧЕРЕЗ GPU-КОВЁР
-	# Единый шаблонный MultiMesh на Y=0 поднимается и маскируется шейдером
+	# СПАВН ТРАВЫ — ОТЛОЖЕННАЯ ЗАГРУЗКА ЧЕРЕЗ ОЧЕРЕДЬ
+	# multimesh травы УЖЕ собран в фоне.
+	# Очередь нужна лишь для того, чтобы ImageTexture.create_from_image()
+	# распределялся по кадрам без единовременного лока GPU.
 	# =========================================================================
-	if enable_grass and terrain_img != null:
-		var grass_mm_inst := MultiMeshInstance3D.new()
-		grass_mm_inst.multimesh = get_shared_grass_multimesh()
-		
-		var base_mat : ShaderMaterial = grass_material
+	if enable_grass and not terrain_data.is_empty():
+		var chunk_world_size := chunk_size * cell_size
+		var base_mat : ShaderMaterial = _cached_grass_material
 		if base_mat == null:
-			var default_mat_path := "res://materials/grass_material.tres"
-			if ResourceLoader.exists(default_mat_path):
-				base_mat = load(default_mat_path)
+			base_mat = grass_material
 		
-		if base_mat != null:
-			var mat_inst := base_mat.duplicate() as ShaderMaterial
-			var tex := ImageTexture.create_from_image(terrain_img)
-			mat_inst.set_shader_parameter("terrain_data", tex)
-			mat_inst.set_shader_parameter("chunk_size_world", chunk_size * cell_size)
-			grass_mm_inst.material_override = mat_inst
-			
-		chunk_node.add_child(grass_mm_inst)
+		# Мировая позиция угла чанка (с учётом смещения генератора)
+		var abs_chunk_x := pos_of_chunk.x * chunk_world_size - generate_point.x
+		var abs_chunk_z := pos_of_chunk.y * chunk_world_size - generate_point.y
+		
+		_grass_upload_queue.push_back({
+			"chunk_node":       chunk_node,
+			"terrain_img":      terrain_data["image"],
+			"min_h":            terrain_data["min_height"],
+			"max_h":            terrain_data["max_height"],
+			"chunk_world_size": chunk_world_size,
+			"grass_multimesh":  terrain_data["multimesh"],
+			"base_mat":         base_mat,
+			"chunk_world_pos":  Vector2(abs_chunk_x, abs_chunk_z),
+		})
 	
 	add_child(chunk_node)
 	
 	chunk_node.position = Vector3(
-		pos_of_chunk.x * chunk_size * cell_size, 
-		0, 
-		pos_of_chunk.y * chunk_size  * cell_size
+		pos_of_chunk.x * chunk_size * cell_size,
+		0,
+		pos_of_chunk.y * chunk_size * cell_size
 	)
 
 func get_chunk_coords(world_pos: Vector2) -> Vector2i:

@@ -1,0 +1,14 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://judijy1w87jx"]
+
+[ext_resource type="Shader" uid="uid://cmjojfpymfljn" path="res://shaders/tree.gdshader" id="1_qvap4"]
+[ext_resource type="Texture2D" uid="uid://dbt5vvxxap6x3" path="res://textures/tree_texture.png" id="2_xuq3j"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_qvap4")
+shader_parameter/albedo_texture = ExtResource("2_xuq3j")
+shader_parameter/wind_strength = 0.05
+shader_parameter/wind_speed = 1.5
+shader_parameter/wind_direction = Vector2(1, 0.5)
+shader_parameter/stiffness = 0.5
+shader_parameter/trunk_flexibility = 0.2000000095

@@ -3,8 +3,9 @@ shader_type spatial;
 render_mode cull_disabled;
 
 // --- Данные рельефа чанка (R = высота в метрах, G = маска плотности травы 0.0..1.0) ---
-uniform sampler2D terrain_data : filter_linear, repeat_disable;
+uniform sampler2D terrain_data : filter_nearest, repeat_disable;
 uniform float chunk_size_world = 16.0;
+uniform vec2 chunk_world_pos; // Добавляем ручную передачу координат
 
 // --- Цвета травы и шум оттенков ---
 uniform vec3 color : source_color = vec3(0.0, 0.86, 0.0);
@@ -25,7 +26,7 @@ varying float v_grass_mask;
 void vertex() {
 	// 1. Вычисляем координаты инстанса относительно чанка для UV сэмплирования
 	vec3 instance_world_pos = MODEL_MATRIX[3].xyz;
-	vec2 chunk_uv = clamp((instance_world_pos.xz - NODE_POSITION_WORLD.xz) / chunk_size_world, 0.0, 1.0);
+	vec2 chunk_uv = clamp((instance_world_pos.xz - chunk_world_pos) / chunk_size_world, 0.0, 1.0);
 	
 	// 2. Считываем данные рельефа чанка: R = высота, G = маска препятствий
 	vec4 terrain_sample = texture(terrain_data, chunk_uv);
@@ -33,30 +34,30 @@ void vertex() {
 	float grass_mask = terrain_sample.g;
 	v_grass_mask = grass_mask;
 	
-	// 3. Схлопывание вершин (Vertex Collapsing):
-	// Если маска близка к 0 (препятствие, ствол дерева, валун, вода, крутая скала)
-	if (grass_mask < 0.05) {
-		VERTEX = vec3(0.0);
-	} else {
-		// Плавное уменьшение высоты травы на границе препятствий (градиент)
-		float blade_height_scale = clamp(grass_mask * 1.4, 0.0, 1.0);
-		VERTEX.y *= blade_height_scale;
-		
-		// Поднимаем травинку на точную высоту поверхности рельефа
-		VERTEX.y += terrain_height;
-		
-		// 4. Покачивание от ветра (верхушка колышется, корень неподвижен)
-		world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-		vec2 noise_uv = world_pos.xz * noise_scale + (TIME * wind_wave_vec);
-		float noise_value = texture(wind_noise, noise_uv).r;
-		
-		float sway_mask = 1.0 - UV.y;
-		float sway = noise_value * wind_strength;
-		vec3 wind_dir = length(wind_direction) > 0.001 ? normalize(wind_direction) : vec3(1.0, 0.0, 0.0);
-		vec3 global_sway = wind_dir * sway * sway_mask;
-		
-		VERTEX += (global_sway * mat3(MODEL_MATRIX));
-	}
+	// 3. Плавное уменьшение высоты травы на границе препятствий (градиент).
+	// Жёсткого схлопывания вершин (VERTEX = vec3(0.0)) нет: blade_height_scale
+	// уводит куст в ноль плавно, а жёсткий коллапс одной вершины треугольника
+	// при живой соседней порождал спайки-искажения.
+	float blade_height_scale = clamp(grass_mask * 1.4, 0.0, 1.0);
+	VERTEX.y *= blade_height_scale;
+	
+	// 4. Поднимаем травинку на точную высоту поверхности рельефа
+	VERTEX.y += terrain_height;
+	
+	// 5. Покачивание от ветра (верхушка колышется, корень неподвижен)
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	vec2 noise_uv = world_pos.xz * noise_scale + (TIME * wind_wave_vec);
+	float noise_value = texture(wind_noise, noise_uv).r;
+	
+	float sway_mask = 1.0 - UV.y;
+	float sway = noise_value * wind_strength;
+	vec3 wind_dir = length(wind_direction) > 0.001 ? normalize(wind_direction) : vec3(1.0, 0.0, 0.0);
+	vec3 global_sway = wind_dir * sway * sway_mask;
+	
+	// Перевод мирового смещения ветра в локальные координаты вершины:
+	// mat3(inverse(MODEL_MATRIX)) компенсирует случайный масштаб и поворот
+	// инстанса, иначе амплитуда ветра зависела от scale_rnd и ориентации куста.
+	VERTEX += (mat3(inverse(MODEL_MATRIX)) * global_sway) * blade_height_scale;
 }
 
 void fragment() {

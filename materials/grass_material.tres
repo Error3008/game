@@ -19,6 +19,7 @@ seamless = true
 render_priority = 0
 shader = ExtResource("1_7j3mk")
 shader_parameter/chunk_size_world = 16.0
+shader_parameter/chunk_world_pos = Vector2(0, 0)
 shader_parameter/color = Color(0, 0.8627451, 0, 1)
 shader_parameter/color2 = Color(0, 0.3647059, 0, 1)
 shader_parameter/color_noise = SubResource("NoiseTexture2D_dhl3a")
