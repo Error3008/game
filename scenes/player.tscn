@@ -1,0 +1,120 @@
+[gd_scene format=3 uid="uid://c66uyb1iubm6b"]
+
+[ext_resource type="Script" uid="uid://ci6d846ekar5o" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="PackedScene" uid="uid://dwdbweflauce0" path="res://models/knight.glb" id="2_knight"]
+[ext_resource type="Script" uid="uid://qtoewsypb6b0" path="res://scripts/camera_spring_arm.gd" id="3_spring_arm"]
+[ext_resource type="Script" uid="uid://cd306htjk5t75" path="res://scripts/camera_follow.gd" id="4_cam_follow"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.35
+height = 1.85
+
+[sub_resource type="AnimationNodeBlend2" id="AnimationNodeBlend2_combat_mode"]
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_idle"]
+animation = &"Combat_Idle"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_fwd"]
+animation = &"Combat_Walk_Fwd"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_bwd"]
+animation = &"Combat_Walk_Bwd"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_strafe_l"]
+animation = &"Combat_Strafe_L"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_strafe_r"]
+animation = &"Combat_Strafe_R"
+
+[sub_resource type="AnimationNodeBlendSpace2D" id="AnimationNodeBlendSpace2D_combat"]
+sync_mode = 1
+blend_point_0/node = SubResource("AnimationNodeAnimation_combat_idle")
+blend_point_0/pos = Vector2(0, 0)
+blend_point_0/name = &"0"
+blend_point_1/node = SubResource("AnimationNodeAnimation_combat_fwd")
+blend_point_1/pos = Vector2(0, 1)
+blend_point_1/name = &"1"
+blend_point_2/node = SubResource("AnimationNodeAnimation_combat_bwd")
+blend_point_2/pos = Vector2(0, -1)
+blend_point_2/name = &"2"
+blend_point_3/node = SubResource("AnimationNodeAnimation_combat_strafe_l")
+blend_point_3/pos = Vector2(-1, 0)
+blend_point_3/name = &"3"
+blend_point_4/node = SubResource("AnimationNodeAnimation_combat_strafe_r")
+blend_point_4/pos = Vector2(1, 0)
+blend_point_4/name = &"4"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_idle"]
+animation = &"Idle"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_walk"]
+animation = &"Walk"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_run"]
+animation = &"Run"
+
+[sub_resource type="AnimationNodeBlendSpace1D" id="AnimationNodeBlendSpace1D_locomotion"]
+min_space = 0.0
+sync_mode = 1
+blend_point_0/node = SubResource("AnimationNodeAnimation_idle")
+blend_point_0/pos = 0.0
+blend_point_0/name = &"0"
+blend_point_1/node = SubResource("AnimationNodeAnimation_walk")
+blend_point_1/pos = 0.5
+blend_point_1/name = &"1"
+blend_point_2/node = SubResource("AnimationNodeAnimation_run")
+blend_point_2/pos = 1.0
+blend_point_2/name = &"2"
+
+[sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_speed"]
+
+[sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_root"]
+graph_offset = Vector2(-360, 40)
+nodes/output/position = Vector2(500, 160)
+nodes/SpeedScale/node = SubResource("AnimationNodeTimeScale_speed")
+nodes/SpeedScale/position = Vector2(280, 160)
+nodes/CombatMode/node = SubResource("AnimationNodeBlend2_combat_mode")
+nodes/CombatMode/position = Vector2(60, 140)
+nodes/Locomotion/node = SubResource("AnimationNodeBlendSpace1D_locomotion")
+nodes/Locomotion/position = Vector2(-220, 60)
+nodes/CombatMovement/node = SubResource("AnimationNodeBlendSpace2D_combat")
+nodes/CombatMovement/position = Vector2(-220, 240)
+node_connections = [&"output", 0, &"SpeedScale", &"SpeedScale", 0, &"CombatMode", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_spring"]
+radius = 0.2
+
+[node name="Player" type="CharacterBody3D" unique_id=1906659559 groups=["player"]]
+collision_layer = 2
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1071955899]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.925, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="pawn" parent="." unique_id=1033837630 instance=ExtResource("2_knight")]
+
+[node name="AnimationTree" type="AnimationTree" parent="pawn" unique_id=360072358]
+tree_root = SubResource("AnimationNodeBlendTree_root")
+anim_player = NodePath("../AnimationPlayer")
+parameters/SpeedScale/scale = 1.0
+parameters/CombatMode/blend_amount = 0.0
+parameters/Locomotion/blend_position = 0.0
+parameters/CombatMovement/blend_position = Vector2(0, 0)
+
+[node name="SpringArmPivot" type="Node3D" parent="." unique_id=1350710952]
+transform = Transform3D(-1, 0, -8.74228e-08, 0, 1, 0, 8.74228e-08, 0, -1, 0, 1.65, 0)
+script = ExtResource("3_spring_arm")
+show_deadzone_debug = true
+
+[node name="SpringArm3D" type="SpringArm3D" parent="SpringArmPivot" unique_id=623699362]
+shape = SubResource("SphereShape3D_spring")
+spring_length = 3.2
+margin = 0.3
+
+[node name="SpringPosition" type="Node3D" parent="SpringArmPivot/SpringArm3D" unique_id=16282225]
+
+[node name="Camera3D" type="Camera3D" parent="SpringArmPivot" unique_id=1175600393 node_paths=PackedStringArray("spring_arm")]
+current = true
+script = ExtResource("4_cam_follow")
+spring_arm = NodePath("../SpringArm3D/SpringPosition")

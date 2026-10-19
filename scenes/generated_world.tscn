@@ -2,8 +2,8 @@
 
 [ext_resource type="Script" uid="uid://bdhpodccv0o5l" path="res://scripts/world_generation.gd" id="1_t7ybp"]
 [ext_resource type="Script" uid="uid://c74r16fx0mili" path="res://scripts/spawnable_item.gd" id="2_3sdm7"]
-[ext_resource type="PackedScene" uid="uid://d0esriwmdmoik" path="res://models/pawn.glb" id="2_iyuu1"]
 [ext_resource type="Script" uid="uid://e78km73pcabg" path="res://scripts/tree_type_config.gd" id="2_os1fl"]
+[ext_resource type="PackedScene" uid="uid://c66uyb1iubm6b" path="res://scenes/player.tscn" id="2_player"]
 [ext_resource type="ArrayMesh" uid="uid://cl35vupwbgifq" path="res://meshes/tree_2.res" id="3_0lv0l"]
 [ext_resource type="Script" uid="uid://db6tixsv0asyr" path="res://scripts/time_of_day_manager.gd" id="3_1el6v"]
 [ext_resource type="ArrayMesh" uid="uid://fq35fx7pldvk" path="res://meshes/tree_1.res" id="3_32o2n"]
@@ -112,8 +112,8 @@ spawnable_items = Array[ExtResource("2_3sdm7")]([SubResource("Resource_32o2n"), 
 grass_mesh = ExtResource("4_gqyw6")
 grass_material = ExtResource("5_3sdm7")
 
-[node name="pawn" parent="." unique_id=1046195304 instance=ExtResource("2_iyuu1")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55724907, -0.032176018, 2.9552078)
+[node name="Player" parent="." unique_id=1072976797 instance=ExtResource("2_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 45.85924, 0)
 
 [node name="World" type="Node3D" parent="." unique_id=1109286314]
 

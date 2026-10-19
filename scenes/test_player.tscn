@@ -1,0 +1,124 @@
+[gd_scene format=3 uid="uid://buq08fujty464"]
+
+[ext_resource type="PackedScene" uid="uid://c66uyb1iubm6b" path="res://scenes/player.tscn" id="1_player"]
+[ext_resource type="Material" uid="uid://dejwcycs36i40" path="res://materials/sky_material.tres" id="2_sky"]
+[ext_resource type="PackedScene" uid="uid://cd4e6lfjkdno5" path="res://scenes/enemy.tscn" id="3_enemy"]
+
+[sub_resource type="Sky" id="Sky_env"]
+sky_material = ExtResource("2_sky")
+
+[sub_resource type="Environment" id="Environment_test"]
+background_mode = 2
+sky = SubResource("Sky_env")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(120, 1, 120)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
+albedo_color = Color(0.28, 0.42, 0.25, 1)
+roughness = 0.8
+uv1_scale = Vector3(60, 60, 60)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+material = SubResource("StandardMaterial3D_floor")
+size = Vector3(120, 1, 120)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_room"]
+size = Vector3(0.5, 3.5, 12)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.38, 0.38, 0.42, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_room"]
+material = SubResource("StandardMaterial3D_wall")
+size = Vector3(0.5, 3.5, 12)
+
+[node name="TestWorld" type="Node3D" unique_id=127048936]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=293160692]
+environment = SubResource("Environment_test")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=618660025]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
+light_color = Color(1, 0.96, 0.88, 1)
+light_energy = 1.8
+shadow_enabled = true
+
+[node name="Floor" type="StaticBody3D" parent="." unique_id=569890602]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+collision_mask = 2
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor" unique_id=284345718]
+shape = SubResource("BoxShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor" unique_id=279190699]
+mesh = SubResource("BoxMesh_floor")
+
+[node name="Player" parent="." unique_id=402815070 instance=ExtResource("1_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+
+[node name="DynamicEnemy" parent="." unique_id=1273421551 instance=ExtResource("3_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -14)
+
+[node name="ObstacleRooms" type="Node3D" parent="." unique_id=415118311]
+
+[node name="Room1_RightWall" type="Node3D" parent="ObstacleRooms" unique_id=1852656038]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 0, -20)
+
+[node name="WallRight" type="StaticBody3D" parent="ObstacleRooms/Room1_RightWall" unique_id=1490992026]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 1.75, -2)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ObstacleRooms/Room1_RightWall/WallRight" unique_id=1881922530]
+shape = SubResource("BoxShape3D_wall_room")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="ObstacleRooms/Room1_RightWall/WallRight" unique_id=1907189152]
+mesh = SubResource("BoxMesh_wall_room")
+
+[node name="Dummy_RightWall" parent="ObstacleRooms/Room1_RightWall" unique_id=1501681427 instance=ExtResource("3_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -6)
+is_dummy = true
+
+[node name="Room2_LeftWall" type="Node3D" parent="ObstacleRooms" unique_id=1000509895]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 0, -20)
+
+[node name="WallLeft" type="StaticBody3D" parent="ObstacleRooms/Room2_LeftWall" unique_id=2127141741]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 1.75, -2)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ObstacleRooms/Room2_LeftWall/WallLeft" unique_id=1742945576]
+shape = SubResource("BoxShape3D_wall_room")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="ObstacleRooms/Room2_LeftWall/WallLeft" unique_id=987857623]
+mesh = SubResource("BoxMesh_wall_room")
+
+[node name="Dummy_LeftWall" parent="ObstacleRooms/Room2_LeftWall" unique_id=2019673342 instance=ExtResource("3_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -6)
+is_dummy = true
+
+[node name="Room3_Tunnel" type="Node3D" parent="ObstacleRooms" unique_id=725534409]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 30)
+
+[node name="WallLeft" type="StaticBody3D" parent="ObstacleRooms/Room3_Tunnel" unique_id=80566745]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.1, 1.75, 3)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ObstacleRooms/Room3_Tunnel/WallLeft" unique_id=67818466]
+shape = SubResource("BoxShape3D_wall_room")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="ObstacleRooms/Room3_Tunnel/WallLeft" unique_id=1153712796]
+mesh = SubResource("BoxMesh_wall_room")
+
+[node name="WallRight" type="StaticBody3D" parent="ObstacleRooms/Room3_Tunnel" unique_id=496308166]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.1, 1.75, 3)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ObstacleRooms/Room3_Tunnel/WallRight" unique_id=1121221093]
+shape = SubResource("BoxShape3D_wall_room")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="ObstacleRooms/Room3_Tunnel/WallRight" unique_id=1033184988]
+mesh = SubResource("BoxMesh_wall_room")
+
+[node name="Dummy_Tunnel" parent="ObstacleRooms/Room3_Tunnel" unique_id=1742621070 instance=ExtResource("3_enemy")]
+transform = Transform3D(-1, 0, -8.74228e-08, 0, 1, 0, 8.74228e-08, 0, -1, 0, 0.05, 8)
+is_dummy = true

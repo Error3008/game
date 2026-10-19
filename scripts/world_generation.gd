@@ -140,8 +140,11 @@ var _chunk_spawn_queue : Array[Dictionary] = []
 # task_id генерации, которую нужно дождаться перед очисткой (неблокирующий polling).
 # -1 = нет ожидающей задачи.
 var _pending_clear_task_id : int = -1
-# Если true — ждём завершения _pending_clear_task_id, затем очищаем и перегенерируем.
 var _waiting_to_clear : bool = false
+
+func _ready() -> void:
+	if not Engine.is_editor_hint():
+		generate_chunks()
 
 func _process(_delta: float) -> void:
 	# --- Неблокирующее ожидание завершения старой генерации перед очисткой ---
@@ -170,7 +173,7 @@ func _process(_delta: float) -> void:
 	var spawns_done := 0
 	while not _chunk_spawn_queue.is_empty() and spawns_done < spawn_chunks_per_frame:
 		var entry : Dictionary = _chunk_spawn_queue.pop_front()
-		spawn_chunk(entry["pos"], entry["mesh"], entry["objects"], entry["terrain"])
+		spawn_chunk(entry["pos"], entry["mesh"], entry["objects"], entry["terrain"], entry.get("col_shape", null))
 		spawns_done += 1
 
 func _upload_grass_chunk(entry: Dictionary) -> void:
@@ -647,6 +650,20 @@ func generate_chunks():
 		if ResourceLoader.exists(default_mat_path):
 			_cached_grass_material = load(default_mat_path)
 	
+	# Предварительное выпекание кэша всех Curve в основном потоке,
+	# чтобы исключить гонку потоков (data race) при первом sample_baked()
+	if plains_curve:
+		plains_curve.bake()
+	if hills_curve:
+		hills_curve.bake()
+	if hills_inland_curve:
+		hills_inland_curve.bake()
+	if forest_curve:
+		forest_curve.bake()
+	for it in _sorted_spawnable_items:
+		if it and it.spawn_curve:
+			it.spawn_curve.bake()
+	
 	# Сначала очищаем старые чанки (возможно асинхронно), потом стартуем
 	if task_id != -1:
 		# Старая генерация ещё идёт — откладываем, _process запустит после завершения
@@ -1052,6 +1069,14 @@ func generate_single_chunk(index : int):
 	var chunk_mesh := ArrayMesh.new()
 	chunk_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
+	# Построение формы физической коллизии чанка в фоновом потоке
+	var col_faces := PackedVector3Array()
+	col_faces.resize(index_count)
+	for i in range(index_count):
+		col_faces[i] = verts[ind_arr[i]]
+	var chunk_col_shape := ConcavePolygonShape3D.new()
+	chunk_col_shape.set_faces(col_faces)
+
 	var grid_data := generate_grid_objects(c)
 	var chunk_objects : Array = grid_data["objects"]
 	var grass_obstacles : Array = grid_data["grass_obstacles"]
@@ -1065,19 +1090,20 @@ func generate_single_chunk(index : int):
 		terrain_data["multimesh"] = build_grass_multimesh(chunk_seed)
 
 	# Передаём данные в главный поток через очередь — _process контролирует темп.
-	call_deferred("_enqueue_chunk", c, chunk_mesh, chunk_objects, terrain_data)
+	call_deferred("_enqueue_chunk", c, chunk_mesh, chunk_objects, terrain_data, chunk_col_shape)
 
 ## Вызывается через call_deferred из фонового потока.
 ## Кладёт готовые данные чанка в очередь; _process добавит ноду в сцену в нужный кадр.
-func _enqueue_chunk(pos_of_chunk: Vector2, mesh_data: ArrayMesh, chunk_objects: Array, terrain_data: Dictionary) -> void:
+func _enqueue_chunk(pos_of_chunk: Vector2, mesh_data: ArrayMesh, chunk_objects: Array, terrain_data: Dictionary, col_shape: Shape3D = null) -> void:
 	_chunk_spawn_queue.push_back({
-		"pos":     pos_of_chunk,
-		"mesh":    mesh_data,
-		"objects": chunk_objects,
-		"terrain": terrain_data,
+		"pos":       pos_of_chunk,
+		"mesh":      mesh_data,
+		"objects":   chunk_objects,
+		"terrain":   terrain_data,
+		"col_shape": col_shape,
 	})
 
-func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : Array = [], terrain_data : Dictionary = {}) -> void:
+func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : Array = [], terrain_data : Dictionary = {}, col_shape: Shape3D = null) -> void:
 	var chunk_node = MeshInstance3D.new()
 	chunk_node.mesh = mesh_data
 	
@@ -1085,6 +1111,16 @@ func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : A
 	mat.vertex_color_use_as_albedo = true
 	mat.vertex_color_is_srgb = true
 	chunk_node.material_override = mat
+	
+	# Статическая физическая коллизия рельефа чанка (создана в фоне)
+	if col_shape:
+		var static_body := StaticBody3D.new()
+		static_body.collision_layer = 1
+		static_body.collision_mask = 0
+		var collision_shape := CollisionShape3D.new()
+		collision_shape.shape = col_shape
+		static_body.add_child(collision_shape)
+		chunk_node.add_child(static_body)
 	
 	# =========================================================================
 	# СПАВН ОБЪЕКТОВ ЧЕРЕЗ MULTIMESH

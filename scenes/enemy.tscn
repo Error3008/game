@@ -1,113 +1,105 @@
 [gd_scene format=3 uid="uid://cd4e6lfjkdno5"]
 
-[ext_resource type="PackedScene" uid="uid://d0esriwmdmoik" path="res://models/pawn.glb" id="1_7p1mj"]
+[ext_resource type="Script" uid="uid://dijswvpa0wwve" path="res://scripts/enemy.gd" id="1_enemy"]
+[ext_resource type="PackedScene" uid="uid://dwdbweflauce0" path="res://models/knight.glb" id="2_knight"]
 
-[sub_resource type="AnimationNodeBlend2" id="AnimationNodeBlend2_dei3t"]
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_enemy"]
+radius = 0.35
+height = 1.85
 
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_4x1ow"]
-animation = &"Combat walk"
-
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_dei3t"]
-animation = &"Combat walk reversed"
-
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_8namd"]
-animation = &"Combat strafe final"
-
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_xxou2"]
-animation = &"Сombat strafe reversed final"
-
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_j1l8d"]
-animation = &"Combat idle"
-
-[sub_resource type="AnimationNodeBlendSpace2D" id="AnimationNodeBlendSpace2D_eawvb"]
-blend_point_0/node = SubResource("AnimationNodeAnimation_4x1ow")
-blend_point_0/pos = Vector2(0, 1)
-blend_point_1/node = SubResource("AnimationNodeAnimation_dei3t")
-blend_point_1/pos = Vector2(0, -1)
-blend_point_2/node = SubResource("AnimationNodeAnimation_8namd")
-blend_point_2/pos = Vector2(1, 0)
-blend_point_3/node = SubResource("AnimationNodeAnimation_xxou2")
-blend_point_3/pos = Vector2(-1, 0)
-blend_point_4/node = SubResource("AnimationNodeAnimation_j1l8d")
-blend_point_4/pos = Vector2(0, 0)
-
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_tyhi5"]
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_idle"]
 animation = &"Idle"
 
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_c4qij"]
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_walk"]
 animation = &"Walk"
 
-[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_bc0ed"]
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_run"]
 animation = &"Run"
 
-[sub_resource type="AnimationNodeBlendSpace1D" id="AnimationNodeBlendSpace1D_4x1ow"]
-blend_point_0/node = SubResource("AnimationNodeAnimation_tyhi5")
-blend_point_0/pos = 0.0
-blend_point_1/node = SubResource("AnimationNodeAnimation_c4qij")
-blend_point_1/pos = 0.5
-blend_point_2/node = SubResource("AnimationNodeAnimation_bc0ed")
-blend_point_2/pos = 1.0
+[sub_resource type="AnimationNodeBlendSpace1D" id="AnimationNodeBlendSpace1D_locomotion"]
 min_space = 0.0
+sync_mode = 1
+blend_point_0/node = SubResource("AnimationNodeAnimation_idle")
+blend_point_0/pos = 0.0
+blend_point_1/node = SubResource("AnimationNodeAnimation_walk")
+blend_point_1/pos = 0.5
+blend_point_2/node = SubResource("AnimationNodeAnimation_run")
+blend_point_2/pos = 1.0
 
-[sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_pabg2"]
-graph_offset = Vector2(-374.18384, 33.345287)
-nodes/output/position = Vector2(592, 160)
-"nodes/Default movement/node" = SubResource("AnimationNodeBlendSpace1D_4x1ow")
-"nodes/Default movement/position" = Vector2(-256, 48)
-"nodes/Combat mode/node" = SubResource("AnimationNodeBlend2_dei3t")
-"nodes/Combat mode/position" = Vector2(144, 112)
-"nodes/Combat movement/node" = SubResource("AnimationNodeBlendSpace2D_eawvb")
-"nodes/Combat movement/position" = Vector2(-256, 272)
-node_connections = [&"output", 0, &"Combat mode", &"Combat mode", 0, &"Default movement", &"Combat mode", 1, &"Combat movement"]
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_idle"]
+animation = &"Combat_Idle"
 
-[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_u2v4h"]
-radius = 0.3857422
-height = 1.9765625
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_fwd"]
+animation = &"Combat_Walk_Fwd"
 
-[sub_resource type="SphereShape3D" id="SphereShape3D_tyhi5"]
-radius = 10.0
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_bwd"]
+animation = &"Combat_Walk_Bwd"
 
-[node name="Enemy" type="CharacterBody3D" unique_id=1129207163]
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_strafe_l"]
+animation = &"Combat_Strafe_L"
 
-[node name="pawn" parent="." unique_id=549538332 instance=ExtResource("1_7p1mj")]
-transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_combat_strafe_r"]
+animation = &"Combat_Strafe_R"
 
-[node name="Skeleton3D" parent="pawn/Арматура" parent_id_path=PackedInt32Array(549538332, 1388064785) index="0" unique_id=819899996]
-bones/0/position = Vector3(0, 0.9087428, 0.0015438977)
-bones/0/rotation = Quaternion(0.05996923, 0.088255495, -0.005323075, 0.9942768)
-bones/1/rotation = Quaternion(0.033088926, -0.00012946485, 0.028176632, 0.99905515)
-bones/2/rotation = Quaternion(0.62473595, -0.06259544, 0.05565731, 0.7763305)
-bones/3/rotation = Quaternion(0.9523946, -0.07705221, -0.1557613, 0.25049132)
-bones/4/rotation = Quaternion(-0.00070521125, 1.5596475e-08, 0.32135043, 0.94696015)
-bones/5/rotation = Quaternion(-0.050114166, 0.5821285, 0.10347405, 0.8049274)
-bones/6/rotation = Quaternion(0.8559834, 0.057863537, 0.50593215, 0.089314)
-bones/7/rotation = Quaternion(-0.0013607544, -1.0290479e-08, -0.62007433, 0.78454196)
-bones/8/rotation = Quaternion(0.0051066894, -0.49682042, 0.008874744, 0.867793)
-bones/9/rotation = Quaternion(0.7744237, 0.08111092, 0.6274397, -0.0028993469)
-bones/10/rotation = Quaternion(-0.004705764, -0.0019598266, 0.26484534, 0.9642775)
-bones/11/rotation = Quaternion(0.09014604, 0.12350333, -0.82939565, 0.5373299)
-bones/12/rotation = Quaternion(0.71494, -0.28105578, -0.5925014, 0.24250872)
-bones/13/rotation = Quaternion(-0.0053164326, 0.0019392824, -0.2992139, 0.95416933)
-bones/14/rotation = Quaternion(0.12734495, -0.15339312, 0.634056, 0.74714583)
+[sub_resource type="AnimationNodeBlendSpace2D" id="AnimationNodeBlendSpace2D_combat"]
+sync_mode = 1
+blend_point_0/node = SubResource("AnimationNodeAnimation_combat_idle")
+blend_point_0/pos = Vector2(0, 0)
+blend_point_1/node = SubResource("AnimationNodeAnimation_combat_fwd")
+blend_point_1/pos = Vector2(0, 1)
+blend_point_2/node = SubResource("AnimationNodeAnimation_combat_bwd")
+blend_point_2/pos = Vector2(0, -1)
+blend_point_3/node = SubResource("AnimationNodeAnimation_combat_strafe_l")
+blend_point_3/pos = Vector2(-1, 0)
+blend_point_4/node = SubResource("AnimationNodeAnimation_combat_strafe_r")
+blend_point_4/pos = Vector2(1, 0)
 
-[node name="AnimationTree" type="AnimationTree" parent="pawn" unique_id=1887788164]
-tree_root = SubResource("AnimationNodeBlendTree_pabg2")
+[sub_resource type="AnimationNodeBlend2" id="AnimationNodeBlend2_combat_mode"]
+
+[sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_speed"]
+
+[sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_root"]
+graph_offset = Vector2(-360, 40)
+nodes/output/position = Vector2(500, 160)
+nodes/SpeedScale/node = SubResource("AnimationNodeTimeScale_speed")
+nodes/SpeedScale/position = Vector2(280, 160)
+nodes/CombatMode/node = SubResource("AnimationNodeBlend2_combat_mode")
+nodes/CombatMode/position = Vector2(60, 140)
+nodes/Locomotion/node = SubResource("AnimationNodeBlendSpace1D_locomotion")
+nodes/Locomotion/position = Vector2(-220, 60)
+nodes/CombatMovement/node = SubResource("AnimationNodeBlendSpace2D_combat")
+nodes/CombatMovement/position = Vector2(-220, 240)
+node_connections = [&"output", 0, &"SpeedScale", &"SpeedScale", 0, &"CombatMode", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_detection"]
+radius = 12.0
+
+[node name="Enemy" type="CharacterBody3D" groups=["enemy"]]
+collision_layer = 4
+collision_mask = 3
+script = ExtResource("1_enemy")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.925, 0)
+shape = SubResource("CapsuleShape3D_enemy")
+
+[node name="pawn" parent="." instance=ExtResource("2_knight")]
+
+[node name="AnimationTree" type="AnimationTree" parent="pawn"]
+tree_root = SubResource("AnimationNodeBlendTree_root")
 anim_player = NodePath("../AnimationPlayer")
-"parameters/Default movement/blend_position" = 0.0
-"parameters/Combat mode/blend_amount" = 1.0
-"parameters/Combat movement/blend_position" = Vector2(0, 0)
+parameters/CombatMode/blend_amount = 0.0
+parameters/CombatMovement/blend_position = Vector2(0, 0)
+parameters/Locomotion/blend_position = 0.0
+parameters/SpeedScale/scale = 1.0
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1629436923]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9851446, 0)
-shape = SubResource("CapsuleShape3D_u2v4h")
+[node name="DetectionArea" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 2
 
-[node name="Area3D" type="Area3D" parent="." unique_id=205790627]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DetectionArea"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.925, 0)
+shape = SubResource("SphereShape3D_detection")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D" unique_id=416699768]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.99791145, 0)
-shape = SubResource("SphereShape3D_tyhi5")
-
-[node name="NavigationAgent3D" type="NavigationAgent3D" parent="." unique_id=1826911966]
-debug_enabled = true
-
-[editable path="pawn"]
+[connection signal="body_entered" from="DetectionArea" to="." method="_on_detection_area_body_entered"]
+[connection signal="body_exited" from="DetectionArea" to="." method="_on_detection_area_body_exited"]

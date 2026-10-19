@@ -1,0 +1,11 @@
+[gd_resource type="StandardMaterial3D" format=3 uid="uid://c7ikpifnt7mmf"]
+
+[ext_resource type="Texture2D" uid="uid://bcb71gflnexda" path="res://textures/knight_palette.png" id="1_palette"]
+
+[resource]
+resource_name = "M_Cloth_Leather"
+cull_mode = 2
+albedo_texture = ExtResource("1_palette")
+albedo_texture_force_srgb = true
+roughness = 0.85
+texture_filter = 0
