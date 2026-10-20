@@ -1,5 +1,14 @@
 extends CharacterBody3D
 
+# --- Combat & Attacks ---
+@export_group("Combat & Attacks")
+@export var max_health: float = 100.0
+@export var attack_damage: float = 35.0
+@export var attack_lunge_speed: float = 2.2
+@export var attack_windup_time: float = 0.40
+@export var attack_active_end_time: float = 0.75
+@export var attack_total_duration: float = 1.40
+
 # --- Movement Speeds ---
 @export_group("Movement Speeds")
 @export var walk_speed: float = 2.5
@@ -33,9 +42,38 @@ extends CharacterBody3D
 var is_lock_enabled: bool = false
 var current_target: Node3D = null
 
+# Combat & Attack state
+var current_health: float = 100.0
+var is_attacking: bool = false
+var attack_time_elapsed: float = 0.0
+var weapon_hitbox: Hitbox = null
+
 # Animation targets
 var target_combat_mode: float = 0.0
 var target_combat_movement: Vector2 = Vector2.ZERO
+
+
+func _ready() -> void:
+	current_health = max_health
+	if is_instance_valid(animation_tree):
+		animation_tree.active = true
+	_setup_weapon_hitbox()
+
+
+func _setup_weapon_hitbox() -> void:
+	if not is_instance_valid(pawn):
+		pawn = get_node_or_null("pawn")
+	if not is_instance_valid(pawn):
+		return
+
+	var sword := pawn.find_child("greatsword", true, false)
+	if sword:
+		var hitbox_scene := preload("res://scenes/combat/hitbox.tscn")
+		weapon_hitbox = hitbox_scene.instantiate()
+		weapon_hitbox.attacker = self
+		weapon_hitbox.damage = attack_damage
+		weapon_hitbox.collision_mask = 4 # scans Enemies (layer 4)
+		sword.add_child(weapon_hitbox)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -46,17 +84,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_clear_target()
 
+	if event.is_action_pressed("attack"):
+		if not is_attacking:
+			_start_attack()
+
 
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 
-	_update_target_lock()
-
-	if is_instance_valid(current_target):
-		_process_locked_movement(delta)
+	if is_attacking:
+		_process_attack(delta)
 	else:
-		_process_free_movement(delta)
+		_update_target_lock()
+
+		if is_instance_valid(current_target):
+			_process_locked_movement(delta)
+		else:
+			_process_free_movement(delta)
 
 	_update_animations(delta)
 	move_and_slide()
@@ -188,6 +233,83 @@ func _process_locked_movement(delta: float) -> void:
 	else:
 		velocity.x = lerp(velocity.x, 0.0, decel * delta)
 		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+
+
+# --- Attack Processing & Combat API ---
+
+func _start_attack() -> void:
+	is_attacking = true
+	attack_time_elapsed = 0.0
+	target_combat_mode = 1.0
+	target_combat_movement = Vector2.ZERO
+	_play_action(&"heavy_attack")
+
+
+func _process_attack(delta: float) -> void:
+	target_combat_mode = 1.0
+	attack_time_elapsed += delta
+
+	# Phase 1: Windup (0.0 to attack_windup_time)
+	if attack_time_elapsed < attack_windup_time:
+		# If locked onto target, orient towards target
+		if is_instance_valid(current_target):
+			var to_enemy := current_target.global_position - global_position
+			to_enemy.y = 0.0
+			if to_enemy.length_squared() > 0.01:
+				var target_angle := atan2(to_enemy.x, to_enemy.z)
+				pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, combat_rotation_speed * delta)
+		else:
+			# Free mode: steer initial direction if WASD is held
+			var input_dir := Input.get_vector("a", "d", "w", "s")
+			if input_dir != Vector2.ZERO:
+				var cam_dir := (spring_arm_pivot.global_transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
+				var target_angle := atan2(cam_dir.x, cam_dir.z)
+				pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, lerp_angle_weight_scale * delta)
+
+		velocity.x = lerp(velocity.x, 0.0, decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+
+	# Phase 2: Active Swing (attack_windup_time to attack_active_end_time)
+	elif attack_time_elapsed < attack_active_end_time:
+		if is_instance_valid(weapon_hitbox) and not weapon_hitbox.is_active:
+			weapon_hitbox.set_active(true)
+		# Lunge forward slightly along pawn orientation
+		var forward_dir: Vector3 = pawn.global_transform.basis.z
+		velocity.x = lerp(velocity.x, forward_dir.x * attack_lunge_speed, 10.0 * delta)
+		velocity.z = lerp(velocity.z, forward_dir.z * attack_lunge_speed, 10.0 * delta)
+
+	# Phase 3: Recovery (attack_active_end_time to attack_total_duration)
+	else:
+		if is_instance_valid(weapon_hitbox) and weapon_hitbox.is_active:
+			weapon_hitbox.set_active(false)
+		velocity.x = lerp(velocity.x, 0.0, decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+
+	if attack_time_elapsed >= attack_total_duration:
+		_end_attack()
+
+
+func _end_attack() -> void:
+	if is_instance_valid(weapon_hitbox):
+		weapon_hitbox.set_active(false)
+	is_attacking = false
+
+
+func _play_action(action_name: StringName) -> void:
+	if not is_instance_valid(animation_tree):
+		return
+	animation_tree.set("parameters/ActionSelect/transition_request", str(action_name))
+	animation_tree.set("parameters/ActionOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+
+
+func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D) -> void:
+	current_health -= amount
+	var attacker_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Unknown"
+	print("[Player] Took %.1f damage from %s! Remaining HP: %.1f" % [amount, attacker_name, current_health])
+
+	# Apply knockback
+	velocity.x += knockback_impulse.x
+	velocity.z += knockback_impulse.z
 
 
 # --- AnimationTree Blending ---

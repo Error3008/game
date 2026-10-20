@@ -7,6 +7,19 @@ extends CharacterBody3D
 # --- Dummy / Training ---
 @export_group("Dummy / Training")
 @export var is_dummy: bool = false # If true, stays in place, faces player and holds combat stance
+@export var dummy_can_attack: bool = false # If true, dummy will also test attack swings
+
+# --- Combat & Attacks ---
+@export_group("Combat & Attacks")
+@export var max_health: float = 100.0
+@export var attack_damage: float = 20.0
+@export var attack_range: float = 2.8           # Range to initiate attack
+@export var attack_cooldown_min: float = 3.0    # Min seconds between attacks
+@export var attack_cooldown_max: float = 5.0    # Max seconds between attacks
+@export var attack_lunge_speed: float = 2.0     # Forward step during slash
+@export var attack_windup_time: float = 0.40    # Windup / telegraph phase
+@export var attack_active_end_time: float = 0.75 # Active damage window end
+@export var attack_total_duration: float = 1.40 # Total attack recovery duration
 
 # --- Movement speeds ---
 @export_group("Movement Speeds")
@@ -38,10 +51,11 @@ extends CharacterBody3D
 @export var anim_speed_multiplier: float = 1.0
 
 # --- State Machine ---
-enum State { IDLE, CHASE, COMBAT }
+enum State { IDLE, CHASE, COMBAT, ATTACK }
 var current_state: State = State.IDLE
 
 var player: Node3D = null
+var current_health: float = 100.0
 
 # Animation targets
 var target_combat_mode: float = 0.0
@@ -51,14 +65,40 @@ var target_combat_mode: float = 0.0
 #   (0, 0)  = Combat Idle
 var target_combat_movement: Vector2 = Vector2.ZERO
 
-# Tactical orbit decision timer
+# Tactical timers
 var combat_action_timer: float = 0.0
+var attack_cooldown_timer: float = 0.0
+var attack_time_elapsed: float = 0.0
+
+# Weapon Hitbox
+var weapon_hitbox: Hitbox = null
 
 
 func _ready() -> void:
+	current_health = max_health
+	attack_cooldown_timer = randf_range(1.5, 3.5)
+
 	# Ensure AnimationTree is active
 	if is_instance_valid(animation_tree):
 		animation_tree.active = true
+
+	_setup_weapon_hitbox()
+
+
+func _setup_weapon_hitbox() -> void:
+	if not is_instance_valid(pawn):
+		pawn = get_node_or_null("pawn")
+	if not is_instance_valid(pawn):
+		return
+
+	var sword := pawn.find_child("greatsword", true, false)
+	if sword:
+		var hitbox_scene := preload("res://scenes/combat/hitbox.tscn")
+		weapon_hitbox = hitbox_scene.instantiate()
+		weapon_hitbox.attacker = self
+		weapon_hitbox.damage = attack_damage
+		weapon_hitbox.collision_mask = 2 # scans Player (collision layer 2)
+		sword.add_child(weapon_hitbox)
 
 
 func _physics_process(delta: float) -> void:
@@ -73,6 +113,8 @@ func _physics_process(delta: float) -> void:
 			_process_chase_state(delta)
 		State.COMBAT:
 			_process_combat_state(delta)
+		State.ATTACK:
+			_process_attack_state(delta)
 
 	_update_animations(delta)
 	move_and_slide()
@@ -148,7 +190,20 @@ func _process_combat_state(delta: float) -> void:
 		var target_angle := atan2(to_player.x, to_player.z)
 		pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, rotation_speed * delta)
 
-	# Dummies hold ground in combat idle
+	# Dummies hold ground in combat idle unless dummy_can_attack is set
+	if is_dummy and not dummy_can_attack:
+		target_combat_movement = Vector2.ZERO
+		velocity.x = lerp(velocity.x, 0.0, decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+		return
+
+	# Attack decision timer
+	attack_cooldown_timer -= delta
+	if attack_cooldown_timer <= 0.0 and dist <= attack_range:
+		_start_attack()
+		return
+
+	# If is_dummy is true but dummy_can_attack is enabled, hold ground between attacks
 	if is_dummy:
 		target_combat_movement = Vector2.ZERO
 		velocity.x = lerp(velocity.x, 0.0, decel * delta)
@@ -198,6 +253,83 @@ func _pick_new_orbit_action() -> void:
 		# Combat pause / stare down
 		target_combat_movement = Vector2.ZERO
 		combat_action_timer = randf_range(0.6, 1.2)
+
+
+# --- Attack State & Combat API ---
+
+func _start_attack() -> void:
+	current_state = State.ATTACK
+	attack_time_elapsed = 0.0
+	target_combat_movement = Vector2.ZERO
+	_play_action(&"heavy_attack")
+
+
+func _process_attack_state(delta: float) -> void:
+	target_combat_mode = 1.0
+	attack_time_elapsed += delta
+
+	# Phase 1: Windup (0.0 to attack_windup_time)
+	# Smoothly track player orientation during windup so attack is well-aimed
+	if attack_time_elapsed < attack_windup_time:
+		if is_instance_valid(player):
+			var to_player := player.global_position - global_position
+			to_player.y = 0.0
+			if to_player.length_squared() > 0.01:
+				var target_angle := atan2(to_player.x, to_player.z)
+				pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, rotation_speed * delta)
+		velocity.x = lerp(velocity.x, 0.0, decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+
+	# Phase 2: Active Swing (attack_windup_time to attack_active_end_time)
+	elif attack_time_elapsed < attack_active_end_time:
+		if is_instance_valid(weapon_hitbox) and not weapon_hitbox.is_active:
+			weapon_hitbox.set_active(true)
+		# Lunge forward slightly along attack vector
+		var forward_dir: Vector3 = pawn.global_transform.basis.z
+		velocity.x = lerp(velocity.x, forward_dir.x * attack_lunge_speed, 10.0 * delta)
+		velocity.z = lerp(velocity.z, forward_dir.z * attack_lunge_speed, 10.0 * delta)
+
+	# Phase 3: Recovery (attack_active_end_time to attack_total_duration)
+	else:
+		if is_instance_valid(weapon_hitbox) and weapon_hitbox.is_active:
+			weapon_hitbox.set_active(false)
+		velocity.x = lerp(velocity.x, 0.0, decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, decel * delta)
+
+	# Attack completion check
+	if attack_time_elapsed >= attack_total_duration:
+		_end_attack()
+
+
+func _end_attack() -> void:
+	if is_instance_valid(weapon_hitbox):
+		weapon_hitbox.set_active(false)
+	current_state = State.COMBAT
+	attack_cooldown_timer = randf_range(attack_cooldown_min, attack_cooldown_max)
+	combat_action_timer = randf_range(0.8, 1.8)
+
+
+func _play_action(action_name: StringName) -> void:
+	if not is_instance_valid(animation_tree):
+		return
+	animation_tree.set("parameters/ActionSelect/transition_request", str(action_name))
+	animation_tree.set("parameters/ActionOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+
+
+func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D) -> void:
+	current_health -= amount
+	var attacker_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Unknown"
+	print("[%s] took %.1f damage from %s! Remaining HP: %.1f" % [name, amount, attacker_name, current_health])
+
+	# Apply knockback
+	velocity.x += knockback_impulse.x
+	velocity.z += knockback_impulse.z
+
+	# Alert and engage if struck while idle
+	if current_state == State.IDLE and is_instance_valid(attacker_node):
+		player = attacker_node
+		current_state = State.COMBAT
+
 
 
 # --- AnimationTree Blending ---
