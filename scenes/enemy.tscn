@@ -61,18 +61,36 @@ blend_point_4/pos = Vector2(1, 0)
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_heavy_slash"]
 animation = &"Combat_Heavy_Slash"
 
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_dash_fwd"]
+animation = &"Combat_Dash_Fwd"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_dash_bwd"]
+animation = &"Combat_Dash_Bwd"
+
 [sub_resource type="AnimationNodeTransition" id="AnimationNodeTransition_actions"]
-input_count = 2
+input_count = 6
 input_0/name = &"heavy_attack"
 input_0/auto_advance = false
 input_0/reset = true
 input_1/name = &"light_attack"
 input_1/auto_advance = false
 input_1/reset = true
+input_2/name = &"dash_fwd"
+input_2/auto_advance = false
+input_2/reset = true
+input_3/name = &"dash_bwd"
+input_3/auto_advance = false
+input_3/reset = true
+input_4/name = &"dash_left"
+input_4/auto_advance = false
+input_4/reset = true
+input_5/name = &"dash_right"
+input_5/auto_advance = false
+input_5/reset = true
 
 [sub_resource type="AnimationNodeOneShot" id="AnimationNodeOneShot_action"]
-fadein_time = 0.1
-fadeout_time = 0.2
+fadein_time = 0.08
+fadeout_time = 0.15
 
 [sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_root"]
 graph_offset = Vector2(-200, 40)
@@ -87,11 +105,15 @@ nodes/CombatMovement/node = SubResource("AnimationNodeBlendSpace2D_combat")
 nodes/CombatMovement/position = Vector2(-220, 240)
 nodes/HeavyAttack/node = SubResource("AnimationNodeAnimation_heavy_slash")
 nodes/HeavyAttack/position = Vector2(80, 360)
+nodes/DashFwd/node = SubResource("AnimationNodeAnimation_dash_fwd")
+nodes/DashFwd/position = Vector2(80, 480)
+nodes/DashBwd/node = SubResource("AnimationNodeAnimation_dash_bwd")
+nodes/DashBwd/position = Vector2(80, 600)
 nodes/ActionSelect/node = SubResource("AnimationNodeTransition_actions")
 nodes/ActionSelect/position = Vector2(280, 360)
 nodes/ActionOneShot/node = SubResource("AnimationNodeOneShot_action")
 nodes/ActionOneShot/position = Vector2(520, 160)
-node_connections = [&"output", 0, &"ActionOneShot", &"ActionOneShot", 0, &"SpeedScale", &"ActionOneShot", 1, &"ActionSelect", &"ActionSelect", 0, &"HeavyAttack", &"SpeedScale", 0, &"CombatMode", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement"]
+node_connections = [&"output", 0, &"ActionOneShot", &"ActionOneShot", 0, &"SpeedScale", &"ActionOneShot", 1, &"ActionSelect", &"ActionSelect", 0, &"HeavyAttack", &"ActionSelect", 2, &"DashFwd", &"ActionSelect", 3, &"DashBwd", &"SpeedScale", 0, &"CombatMode", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_detection"]
 radius = 12.0

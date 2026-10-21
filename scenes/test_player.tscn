@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://c66uyb1iubm6b" path="res://scenes/player.tscn" id="1_player"]
 [ext_resource type="Material" uid="uid://dejwcycs36i40" path="res://materials/sky_material.tres" id="2_sky"]
 [ext_resource type="PackedScene" uid="uid://cd4e6lfjkdno5" path="res://scenes/enemy.tscn" id="3_enemy"]
+[ext_resource type="Material" path="res://materials/prototype_grid.tres" id="4_grid"]
 
 [sub_resource type="Sky" id="Sky_env"]
 sky_material = ExtResource("2_sky")
@@ -17,13 +18,8 @@ tonemap_mode = 2
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(120, 1, 120)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
-albedo_color = Color(0.28, 0.42, 0.25, 1)
-roughness = 0.8
-uv1_scale = Vector3(60, 60, 60)
-
 [sub_resource type="BoxMesh" id="BoxMesh_floor"]
-material = SubResource("StandardMaterial3D_floor")
+material = ExtResource("4_grid")
 size = Vector3(120, 1, 120)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_wall_room"]
@@ -63,6 +59,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
 
 [node name="DynamicEnemy" parent="." unique_id=1273421551 instance=ExtResource("3_enemy")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -14)
+dodge_chance = 1.0
+reaction_time_min = 0.3
+reaction_time_max = 0.4
 
 [node name="ObstacleRooms" type="Node3D" parent="." unique_id=415118311]
 

@@ -53,7 +53,6 @@ var _previous_lock_target: Node3D = null
 var debug_is_pushing: bool = false
 var current_yaw_diff: float = 0.0
 var current_pitch_diff: float = 0.0
-var _last_valid_box_center: Vector2 = Vector2.ZERO
 var _debug_canvas: CanvasLayer = null
 var _debug_overlay: Control = null
 
@@ -285,6 +284,7 @@ func _update_debug_overlay() -> void:
 # --- Debug HUD Overlay Class ---
 class DeadzoneDebugOverlay extends Control:
 	var pivot: Node3D = null
+	var last_valid_box_center: Vector2 = Vector2.ZERO
 
 	func _process(_delta: float) -> void:
 		queue_redraw()
@@ -335,11 +335,11 @@ class DeadzoneDebugOverlay extends Control:
 					-(tan(clamped_pitch_diff) / tan(v_fov_rad)) * (vp_size.y * 0.5)
 				)
 				box_center = target_screen - target_offset_from_center
-				pivot._last_valid_box_center = box_center
-			elif pivot._last_valid_box_center != Vector2.ZERO:
-				box_center = pivot._last_valid_box_center
-		elif pivot._last_valid_box_center != Vector2.ZERO:
-			box_center = pivot._last_valid_box_center
+				last_valid_box_center = box_center
+			elif last_valid_box_center != Vector2.ZERO:
+				box_center = last_valid_box_center
+		elif last_valid_box_center != Vector2.ZERO:
+			box_center = last_valid_box_center
 
 		var box_rect := Rect2(box_center.x - half_w, box_center.y - half_h, half_w * 2.0, half_h * 2.0)
 

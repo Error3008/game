@@ -13,13 +13,30 @@ extends CharacterBody3D
 @export_group("Combat & Attacks")
 @export var max_health: float = 100.0
 @export var attack_damage: float = 20.0
-@export var attack_range: float = 2.8           # Range to initiate attack
-@export var attack_cooldown_min: float = 3.0    # Min seconds between attacks
-@export var attack_cooldown_max: float = 5.0    # Max seconds between attacks
+@export var attack_range: float = 2.8           # Range to consider attack option
+@export var strike_effective_reach: float = 1.85 # Distance where blade connects solidly
+@export var attack_approach_speed: float = 3.0   # Speed when actively stepping in to strike
+@export var attack_approach_timeout: float = 2.5 # Timeout if player circles away
+@export var attack_cooldown_min: float = 2.5    # Min seconds between attacks
+@export var attack_cooldown_max: float = 4.5    # Max seconds between attacks
 @export var attack_lunge_speed: float = 2.0     # Forward step during slash
 @export var attack_windup_time: float = 0.40    # Windup / telegraph phase
 @export var attack_active_end_time: float = 0.75 # Active damage window end
 @export var attack_total_duration: float = 1.40 # Total attack recovery duration
+
+# --- Combat Dodge / Reactions ---
+@export_group("Combat Dodge / Reactions")
+@export var can_dodge: bool = true               # Global toggle for enemy dodges
+@export var dodge_chance: float = 0.50           # Chance to dodge incoming player attack (50%)
+@export var dodge_trigger_distance: float = 3.5  # Distance within which enemy reacts to player swing
+@export var reaction_time_min: float = 0.10      # Minimum visual reaction delay (seconds)
+@export var reaction_time_max: float = 0.22      # Maximum visual reaction delay (seconds)
+@export var dodge_speed: float = 8.5             # Dodge kinetic impulse speed
+@export var dodge_duration: float = 0.42          # Duration of dodge movement
+@export var dodge_cooldown_min: float = 0.5      # Min seconds between dodges
+@export var dodge_cooldown_max: float = 1.0      # Max seconds between dodges
+@export var dodge_iframe_start: float = 0.04     # I-frame start
+@export var dodge_iframe_end: float = 0.32       # I-frame end
 
 # --- Movement speeds ---
 @export_group("Movement Speeds")
@@ -51,7 +68,7 @@ extends CharacterBody3D
 @export var anim_speed_multiplier: float = 1.0
 
 # --- State Machine ---
-enum State { IDLE, CHASE, COMBAT, ATTACK }
+enum State { IDLE, CHASE, COMBAT, ATTACK_APPROACH, ATTACK, DODGE }
 var current_state: State = State.IDLE
 
 var player: Node3D = null
@@ -69,6 +86,16 @@ var target_combat_movement: Vector2 = Vector2.ZERO
 var combat_action_timer: float = 0.0
 var attack_cooldown_timer: float = 0.0
 var attack_time_elapsed: float = 0.0
+
+# Dodge & Reaction State
+var is_dashing: bool = false
+var dodge_time_elapsed: float = 0.0
+var dodge_cooldown_timer: float = 0.0
+var dodge_move_direction: Vector3 = Vector3.ZERO
+var _has_reacted_to_player_attack: bool = false
+var is_dodge_pending: bool = false
+var pending_dodge_timer: float = 0.0
+var approach_time_elapsed: float = 0.0
 
 # Weapon Hitbox
 var weapon_hitbox: Hitbox = null
@@ -105,6 +132,22 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 
+	if dodge_cooldown_timer > 0.0:
+		dodge_cooldown_timer -= delta
+
+	if is_dodge_pending:
+		pending_dodge_timer -= delta
+		if pending_dodge_timer <= 0.0:
+			is_dodge_pending = false
+			if current_state != State.DODGE and not is_dummy:
+				if is_instance_valid(player) and "is_attacking" in player and player.is_attacking:
+					if current_state == State.ATTACK:
+						if attack_time_elapsed >= attack_active_end_time:
+							_end_attack()
+							_start_dodge()
+					else:
+						_start_dodge()
+
 	# Process states
 	match current_state:
 		State.IDLE:
@@ -113,8 +156,12 @@ func _physics_process(delta: float) -> void:
 			_process_chase_state(delta)
 		State.COMBAT:
 			_process_combat_state(delta)
+		State.ATTACK_APPROACH:
+			_process_attack_approach_state(delta)
 		State.ATTACK:
 			_process_attack_state(delta)
+		State.DODGE:
+			_process_dodge_state(delta)
 
 	_update_animations(delta)
 	move_and_slide()
@@ -152,6 +199,12 @@ func _process_chase_state(delta: float) -> void:
 	if dist <= combat_engage_dist:
 		current_state = State.COMBAT
 		combat_action_timer = 0.0
+		if _check_dodge_reaction(dist):
+			return
+		return
+
+	# If player attempts to attack while running or approaching, react immediately
+	if _check_dodge_reaction(dist):
 		return
 
 	# Dummies do not pursue player, they directly switch to combat stance
@@ -197,11 +250,27 @@ func _process_combat_state(delta: float) -> void:
 		velocity.z = lerp(velocity.z, 0.0, decel * delta)
 		return
 
+	# Reaction check: can dodge incoming player attack (dummies ignored)
+	if _check_dodge_reaction(dist):
+		return
+
 	# Attack decision timer
 	attack_cooldown_timer -= delta
-	if attack_cooldown_timer <= 0.0 and dist <= attack_range:
-		_start_attack()
-		return
+	if attack_cooldown_timer <= 0.0:
+		if is_dummy:
+			if dummy_can_attack:
+				_start_attack()
+			return
+		else:
+			# If already right in strike reach, strike immediately!
+			if dist <= strike_effective_reach:
+				_start_attack()
+				return
+			elif dist <= attack_range:
+				# Within tactical attack range: switch to active approach to close the gap into reach
+				current_state = State.ATTACK_APPROACH
+				approach_time_elapsed = 0.0
+				return
 
 	# If is_dummy is true but dummy_can_attack is enabled, hold ground between attacks
 	if is_dummy:
@@ -253,6 +322,52 @@ func _pick_new_orbit_action() -> void:
 		# Combat pause / stare down
 		target_combat_movement = Vector2.ZERO
 		combat_action_timer = randf_range(0.6, 1.2)
+
+
+func _process_attack_approach_state(delta: float) -> void:
+	target_combat_mode = 1.0
+
+	if not is_instance_valid(player):
+		current_state = State.IDLE
+		return
+
+	var to_player := player.global_position - global_position
+	to_player.y = 0.0
+	var dist := to_player.length()
+
+	# 1. Reaction check: if player counter-attacks during approach, enemy can dodge!
+	if _check_dodge_reaction(dist):
+		return
+
+	# 2. Check if player disengaged or ran far away
+	if dist > combat_disengage_dist:
+		current_state = State.CHASE
+		return
+
+	# 3. Always face player directly
+	if dist > 0.01:
+		var target_angle := atan2(to_player.x, to_player.z)
+		pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, rotation_speed * 1.5 * delta)
+
+	approach_time_elapsed += delta
+
+	# 4. Check if we reached strike reach!
+	if dist <= strike_effective_reach:
+		_start_attack()
+		return
+
+	# 5. Check timeout: if player kited/backpedaled for too long, fall back to combat
+	if approach_time_elapsed >= attack_approach_timeout:
+		current_state = State.COMBAT
+		attack_cooldown_timer = randf_range(1.0, 2.0)
+		combat_action_timer = randf_range(0.8, 1.5)
+		return
+
+	# 6. Step forward rapidly to close the distance into weapon reach
+	target_combat_movement = Vector2(0.0, 1.0)
+	var forward_basis: Vector3 = pawn.global_transform.basis.z
+	velocity.x = lerp(velocity.x, forward_basis.x * attack_approach_speed, combat_accel * 1.2 * delta)
+	velocity.z = lerp(velocity.z, forward_basis.z * attack_approach_speed, combat_accel * 1.2 * delta)
 
 
 # --- Attack State & Combat API ---
@@ -309,6 +424,120 @@ func _end_attack() -> void:
 	combat_action_timer = randf_range(0.8, 1.8)
 
 
+# --- Dodge & Reaction System ---
+
+func _check_dodge_reaction(dist: float) -> bool:
+	# Dummies are strictly excluded from dodging
+	if is_dummy or not can_dodge:
+		return false
+	if current_state == State.DODGE or is_dodge_pending:
+		return true
+	if not is_instance_valid(player) or not ("is_attacking" in player):
+		return false
+
+	# If enemy is currently attacking:
+	if current_state == State.ATTACK:
+		# Allow dodge-cancel during recovery phase if player counter-attacks
+		if attack_time_elapsed >= attack_active_end_time:
+			pass
+		else:
+			return false
+
+	if player.is_attacking:
+		# Check if player is in windup or active swing
+		var player_in_threat_phase: bool = true
+		if "attack_time_elapsed" in player and "attack_active_end_time" in player:
+			player_in_threat_phase = player.attack_time_elapsed <= player.attack_active_end_time
+
+		# Only react when player is in threat phase AND within threat range
+		if player_in_threat_phase and dist <= dodge_trigger_distance:
+			if not _has_reacted_to_player_attack:
+				# If dodge_chance >= 0.99 (100%), bypass cooldown so consecutive strikes can be dodged
+				var effective_cooldown := 0.0 if dodge_chance >= 0.99 else dodge_cooldown_timer
+				if effective_cooldown <= 0.0:
+					_has_reacted_to_player_attack = true
+					if randf() <= dodge_chance:
+						var delay := get_reaction_delay()
+						if delay <= 0.001:
+							if current_state == State.ATTACK:
+								_end_attack()
+							_start_dodge()
+						else:
+							is_dodge_pending = true
+							pending_dodge_timer = delay
+						return true
+	else:
+		_has_reacted_to_player_attack = false
+		is_dodge_pending = false
+
+	return false
+
+
+func get_reaction_delay() -> float:
+	return randf_range(reaction_time_min, reaction_time_max)
+
+
+func _start_dodge() -> void:
+	current_state = State.DODGE
+	is_dashing = true
+	dodge_time_elapsed = 0.0
+	dodge_cooldown_timer = randf_range(dodge_cooldown_min, dodge_cooldown_max)
+	target_combat_mode = 1.0
+	target_combat_movement = Vector2.ZERO
+
+	# Align with player
+	if is_instance_valid(player):
+		var to_player := player.global_position - global_position
+		to_player.y = 0.0
+		if to_player.length_squared() > 0.001:
+			pawn.rotation.y = atan2(to_player.x, to_player.z)
+
+	var forward_basis: Vector3 = pawn.global_transform.basis.z
+	var right_basis: Vector3 = -pawn.global_transform.basis.x
+
+	# 60% retreat backward away from blade, 40% side-step left/right
+	var roll := randf()
+	if roll < 0.60:
+		dodge_move_direction = -forward_basis
+	elif roll < 0.80:
+		dodge_move_direction = -right_basis
+	else:
+		dodge_move_direction = right_basis
+
+	_play_action(&"dash_bwd")
+
+	velocity.x = dodge_move_direction.x * dodge_speed
+	velocity.z = dodge_move_direction.z * dodge_speed
+
+
+func _process_dodge_state(delta: float) -> void:
+	target_combat_mode = 1.0
+	dodge_time_elapsed += delta
+
+	# Always face player during dodge (no turning)
+	if is_instance_valid(player):
+		var to_player := player.global_position - global_position
+		to_player.y = 0.0
+		if to_player.length_squared() > 0.001:
+			var target_angle := atan2(to_player.x, to_player.z)
+			pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, rotation_speed * 1.5 * delta)
+
+	# Decelerate smoothly
+	if dodge_time_elapsed < dodge_duration:
+		var progress := clampf(dodge_time_elapsed / dodge_duration, 0.0, 1.0)
+		var target_speed := lerpf(dodge_speed, 0.0, progress)
+		velocity.x = lerp(velocity.x, dodge_move_direction.x * target_speed, 12.0 * delta)
+		velocity.z = lerp(velocity.z, dodge_move_direction.z * target_speed, 12.0 * delta)
+	else:
+		_end_dodge()
+
+
+func _end_dodge() -> void:
+	is_dashing = false
+	current_state = State.COMBAT
+	combat_action_timer = randf_range(0.6, 1.2)
+
+
 func _play_action(action_name: StringName) -> void:
 	if not is_instance_valid(animation_tree):
 		return
@@ -317,7 +546,14 @@ func _play_action(action_name: StringName) -> void:
 
 
 func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D) -> void:
+	# I-frame check during active dodge window
+	if is_dashing and dodge_time_elapsed >= dodge_iframe_start and dodge_time_elapsed <= dodge_iframe_end:
+		var att_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Player"
+		print("[%s] Dodged attack from %s via dodge i-frame!" % [name, att_name])
+		return
+
 	current_health -= amount
+	is_dodge_pending = false
 	var attacker_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Unknown"
 	print("[%s] took %.1f damage from %s! Remaining HP: %.1f" % [name, amount, attacker_name, current_health])
 

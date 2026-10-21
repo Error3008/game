@@ -9,6 +9,14 @@ extends CharacterBody3D
 @export var attack_active_end_time: float = 0.75
 @export var attack_total_duration: float = 1.40
 
+# --- Combat Dash Settings ---
+@export_group("Combat Dash")
+@export var dash_speed: float = 8.5
+@export var dash_duration: float = 0.42
+@export var dash_cooldown: float = 0.55
+@export var dash_iframe_start: float = 0.04
+@export var dash_iframe_end: float = 0.32
+
 # --- Movement Speeds ---
 @export_group("Movement Speeds")
 @export var walk_speed: float = 2.5
@@ -48,6 +56,28 @@ var is_attacking: bool = false
 var attack_time_elapsed: float = 0.0
 var weapon_hitbox: Hitbox = null
 
+# --- Dash / Dodge System ---
+enum DashDirection {
+	FORWARD,
+	BACKWARD,
+	LEFT,
+	RIGHT
+}
+
+# Maps DashDirection to ActionSelect animation state.
+# When Combat_Dash_Left / Combat_Dash_Right are ready, assign them here!
+const DASH_ANIM_MAP: Dictionary = {
+	DashDirection.FORWARD: &"dash_fwd",
+	DashDirection.BACKWARD: &"dash_bwd",
+	DashDirection.LEFT: &"dash_bwd",   # Temporary fallback to backward dash without turning
+	DashDirection.RIGHT: &"dash_bwd",  # Temporary fallback to backward dash without turning
+}
+
+var is_dashing: bool = false
+var dash_time_elapsed: float = 0.0
+var dash_cooldown_timer: float = 0.0
+var dash_move_direction: Vector3 = Vector3.ZERO
+
 # Animation targets
 var target_combat_mode: float = 0.0
 var target_combat_movement: Vector2 = Vector2.ZERO
@@ -85,15 +115,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			_clear_target()
 
 	if event.is_action_pressed("attack"):
-		if not is_attacking:
+		if not is_attacking and not is_dashing:
 			_start_attack()
+
+	if event.is_action_pressed("dash"):
+		_try_dash()
 
 
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 
-	if is_attacking:
+	if dash_cooldown_timer > 0.0:
+		dash_cooldown_timer -= delta
+
+	if is_dashing:
+		_process_dash(delta)
+	elif is_attacking:
 		_process_attack(delta)
 	else:
 		_update_target_lock()
@@ -295,6 +333,94 @@ func _end_attack() -> void:
 	is_attacking = false
 
 
+# --- Dash Processing & Dodge System ---
+
+func _try_dash() -> void:
+	# Dash is strictly permitted only in combat mode (locked onto a target)
+	if not is_instance_valid(current_target):
+		return
+	if is_dashing:
+		return
+	if dash_cooldown_timer > 0.0:
+		return
+
+	# Dodge cancel: if attacking, allow cancel only during recovery phase
+	if is_attacking:
+		if attack_time_elapsed >= attack_active_end_time:
+			_end_attack()
+		else:
+			return
+
+	_start_dash()
+
+
+func _start_dash() -> void:
+	is_dashing = true
+	dash_time_elapsed = 0.0
+	dash_cooldown_timer = dash_cooldown
+	target_combat_mode = 1.0
+
+	# Align pawn with enemy before launching dash
+	if is_instance_valid(current_target):
+		var to_enemy := current_target.global_position - global_position
+		to_enemy.y = 0.0
+		if to_enemy.length_squared() > 0.001:
+			pawn.rotation.y = atan2(to_enemy.x, to_enemy.z)
+
+	var input_dir := Input.get_vector("a", "d", "w", "s")
+	var forward_step := -input_dir.y
+	var lateral_step := input_dir.x
+
+	var forward_basis: Vector3 = pawn.global_transform.basis.z
+	var right_basis: Vector3 = -pawn.global_transform.basis.x
+
+	var chosen_dir: DashDirection = DashDirection.BACKWARD
+
+	if input_dir.length_squared() < 0.05:
+		# Neutral input in combat: quick backward retreat
+		chosen_dir = DashDirection.BACKWARD
+		dash_move_direction = -forward_basis
+	else:
+		dash_move_direction = (forward_basis * forward_step + right_basis * lateral_step).normalized()
+		if absf(forward_step) >= absf(lateral_step):
+			chosen_dir = DashDirection.FORWARD if forward_step > 0.0 else DashDirection.BACKWARD
+		else:
+			chosen_dir = DashDirection.RIGHT if lateral_step > 0.0 else DashDirection.LEFT
+
+	var anim_name: StringName = DASH_ANIM_MAP.get(chosen_dir, &"dash_bwd")
+	_play_action(anim_name)
+
+	# Initial kinetic velocity
+	velocity.x = dash_move_direction.x * dash_speed
+	velocity.z = dash_move_direction.z * dash_speed
+
+
+func _process_dash(delta: float) -> void:
+	dash_time_elapsed += delta
+	target_combat_mode = 1.0
+
+	# Critical requirement: Keep pawn facing the target at all times (no turning)
+	if is_instance_valid(current_target):
+		var to_enemy := current_target.global_position - global_position
+		to_enemy.y = 0.0
+		if to_enemy.length_squared() > 0.001:
+			var target_angle := atan2(to_enemy.x, to_enemy.z)
+			pawn.rotation.y = lerp_angle(pawn.rotation.y, target_angle, combat_rotation_speed * 1.5 * delta)
+
+	# Physical movement: smoothly decelerate toward combat speed
+	if dash_time_elapsed < dash_duration:
+		var progress := clampf(dash_time_elapsed / dash_duration, 0.0, 1.0)
+		var target_speed := lerpf(dash_speed, combat_walk_speed, progress)
+		velocity.x = lerp(velocity.x, dash_move_direction.x * target_speed, 12.0 * delta)
+		velocity.z = lerp(velocity.z, dash_move_direction.z * target_speed, 12.0 * delta)
+	else:
+		_end_dash()
+
+
+func _end_dash() -> void:
+	is_dashing = false
+
+
 func _play_action(action_name: StringName) -> void:
 	if not is_instance_valid(animation_tree):
 		return
@@ -303,6 +429,12 @@ func _play_action(action_name: StringName) -> void:
 
 
 func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D) -> void:
+	# I-frame check during active dash window
+	if is_dashing and dash_time_elapsed >= dash_iframe_start and dash_time_elapsed <= dash_iframe_end:
+		var att_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Enemy"
+		print("[Player] Dodged attack from %s via dash i-frame!" % att_name)
+		return
+
 	current_health -= amount
 	var attacker_name: String = String(attacker_node.name) if is_instance_valid(attacker_node) else "Unknown"
 	print("[Player] Took %.1f damage from %s! Remaining HP: %.1f" % [amount, attacker_name, current_health])
