@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/weapon_data.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+weapon_name = "Greatsword"
+damage = 20.0
+knockback_force = 4.0
+action_anim_name = &"heavy_attack"
+windup_time = 0.4
+active_end_time = 0.75
+total_duration = 1.4
+lunge_speed = 2.0

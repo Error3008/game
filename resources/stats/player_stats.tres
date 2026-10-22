@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="CharacterStats" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/character_stats.gd" id="1_stats"]
+
+[resource]
+script = ExtResource("1_stats")
+max_health = 100.0
+walk_speed = 2.5
+run_speed = 5.0
+combat_walk_speed = 2.4
+combat_strafe_speed = 2.0
+accel = 10.0
+decel = 12.0
+combat_accel = 8.0
+rotation_speed = 10.0
+lerp_angle_weight_scale = 10.0
+combat_rotation_speed = 12.0
+combat_mode_blend_speed = 6.0
+combat_movement_blend_speed = 8.0
+locomotion_blend_speed = 8.0
+anim_speed_multiplier = 1.0
+enable_stamina = false
+max_stamina = 100.0
+block_impact_stamina_cost = 20.0
+parry_attempt_stamina_cost = 15.0
+parry_success_stamina_refund = 25.0

@@ -27,14 +27,34 @@ func _ready() -> void:
 
 func set_active(active: bool) -> void:
 	is_active = active
-	monitoring = active
-	monitorable = active
+	set_deferred("monitoring", active)
+	set_deferred("monitorable", active)
 	if is_instance_valid(collision_shape):
-		collision_shape.disabled = not active
+		collision_shape.set_deferred("disabled", not active)
 	if is_instance_valid(debug_mesh):
 		debug_mesh.visible = active and debug_visual
 	if active:
 		hit_targets.clear()
+
+
+func _calculate_knockback_direction(target_node: Node3D) -> Vector3:
+	var default_dir := Vector3.FORWARD
+	if is_instance_valid(attacker):
+		var facing: Vector3 = attacker.get_facing_direction() if attacker.has_method("get_facing_direction") else attacker.global_transform.basis.z
+		facing.y = 0.0
+		if facing.length_squared() > 0.001:
+			facing = facing.normalized()
+		else:
+			facing = Vector3.FORWARD
+
+		var to_target := (target_node.global_position - attacker.global_position)
+		to_target.y = 0.0
+
+		# If target is sufficiently in front, push away from attacker; if overlapping or behind, push forward along blade swing
+		if to_target.length_squared() > 0.09 and to_target.normalized().dot(facing) > 0.2:
+			return to_target.normalized()
+		return facing
+	return default_dir
 
 
 func _on_body_entered(body: Node3D) -> void:
@@ -44,14 +64,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 
 	hit_targets.append(body)
-	var knockback_dir: Vector3 = Vector3.FORWARD
-	if is_instance_valid(attacker):
-		knockback_dir = (body.global_position - attacker.global_position)
-		knockback_dir.y = 0.0
-		if knockback_dir.length_squared() > 0.001:
-			knockback_dir = knockback_dir.normalized()
-		else:
-			knockback_dir = attacker.global_transform.basis.z
+	var knockback_dir := _calculate_knockback_direction(body)
 
 	print("[Hitbox] Hit landed on: ", body.name, " (Damage: ", damage, ")")
 	if body.has_method("take_damage"):
@@ -64,9 +77,12 @@ func _on_area_entered(area: Area3D) -> void:
 		return
 	var owner_node: Node3D = area.get_parent() as Node3D
 	if owner_node != null and owner_node != attacker and not (owner_node in hit_targets):
+		hit_targets.append(owner_node)
+		var knockback_dir := _calculate_knockback_direction(owner_node)
+
+		print("[Hitbox] Hit landed on hurtbox: ", area.name, " belonging to ", owner_node.name)
 		if area.has_method("take_damage"):
-			hit_targets.append(owner_node)
-			var knockback_dir: Vector3 = (owner_node.global_position - global_position).normalized()
-			print("[Hitbox] Hit landed on hurtbox: ", area.name, " belonging to ", owner_node.name)
 			area.take_damage(damage, knockback_dir * knockback_force, attacker)
-			hit_landed.emit(owner_node, damage)
+		elif owner_node.has_method("take_damage"):
+			owner_node.take_damage(damage, knockback_dir * knockback_force, attacker)
+		hit_landed.emit(owner_node, damage)
