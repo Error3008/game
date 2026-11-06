@@ -33,9 +33,21 @@ func _ready() -> void:
 		var dsh := DashComponent.new()
 		dsh.name = "DashComponent"
 		add_child(dsh)
+	if not has_node("StaminaComponent"):
+		var stam: StaminaComponent = StaminaComponent.new()
+		stam.name = "StaminaComponent"
+		add_child(stam)
+	if not has_node("KickComponent"):
+		var kick := KickComponent.new()
+		kick.name = "KickComponent"
+		add_child(kick)
 	if not has_node("PlayerController"):
 		var ctrl := PlayerController.new()
 		ctrl.name = "PlayerController"
 		add_child(ctrl)
+	if not has_node("CombatHUD"):
+		var hud: CombatHUD = CombatHUD.new()
+		hud.name = "CombatHUD"
+		add_child(hud)
 
 	super._ready()

@@ -14,3 +14,6 @@ extends Resource
 @export var active_end_time: float = 0.75
 @export var total_duration: float = 1.40
 @export var lunge_speed: float = 2.2
+
+@export_group("Stamina")
+@export var stamina_cost: float = 20.0

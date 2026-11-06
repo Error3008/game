@@ -24,9 +24,13 @@ extends Resource
 @export var locomotion_blend_speed: float = 8.0
 @export var anim_speed_multiplier: float = 1.0
 
-@export_group("Stamina (Future-Proof)")
-@export var enable_stamina: bool = false
+@export_group("Stamina")
+@export var enable_stamina: bool = true
 @export var max_stamina: float = 100.0
-@export var block_impact_stamina_cost: float = 20.0
-@export var parry_attempt_stamina_cost: float = 15.0
-@export var parry_success_stamina_refund: float = 25.0
+@export var stamina_regen_rate: float = 25.0
+@export var stamina_regen_delay: float = 0.8
+@export_range(0.0, 1.0) var block_regen_multiplier: float = 0.25
+@export var block_impact_stamina_cost: float = 35.0
+@export var parry_bonus_stamina: float = 15.0
+@export var parry_attempt_stamina_cost: float = 0.0
+@export var guard_break_stagger_duration: float = 1.5

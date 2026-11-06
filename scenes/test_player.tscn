@@ -59,9 +59,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
 
 [node name="DynamicEnemy" parent="." unique_id=1273421551 instance=ExtResource("3_enemy")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -14)
-dodge_chance = 1.0
-reaction_time_min = 0.3
-reaction_time_max = 0.4
 
 [node name="ObstacleRooms" type="Node3D" parent="." unique_id=415118311]
 
@@ -96,6 +93,7 @@ mesh = SubResource("BoxMesh_wall_room")
 [node name="Dummy_LeftWall" parent="ObstacleRooms/Room2_LeftWall" unique_id=2019673342 instance=ExtResource("3_enemy")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -6)
 is_dummy = true
+dummy_always_block = true
 
 [node name="Room3_Tunnel" type="Node3D" parent="ObstacleRooms" unique_id=725534409]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 30)

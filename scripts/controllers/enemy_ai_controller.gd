@@ -12,6 +12,7 @@ enum State {
 @export_group("Dummy / Training")
 @export var is_dummy: bool = false
 @export var dummy_can_attack: bool = false
+@export var dummy_always_block: bool = false
 
 # --- Combat & Attacks ---
 @export_group("Combat & Attacks")
@@ -32,6 +33,23 @@ enum State {
 @export var dodge_cooldown_min: float = 0.5
 @export var dodge_cooldown_max: float = 1.0
 
+# --- Combat Defense / Block & Parry ---
+@export_group("Combat Defense / Block & Parry")
+@export var can_block: bool = true
+@export var block_chance: float = 0.50
+@export var parry_chance: float = 0.25
+@export var tactical_block_chance: float = 0.35
+@export var block_duration_min: float = 0.6
+@export var block_duration_max: float = 1.3
+
+# --- Combat Kick ---
+@export_group("Combat Kick")
+@export var can_kick: bool = true
+@export var kick_chance_on_blocking_player: float = 0.70
+@export var kick_cooldown_min: float = 2.0
+@export var kick_cooldown_max: float = 4.0
+@export var kick_trigger_dist: float = 2.2
+
 # --- Distances ---
 @export_group("Distances")
 @export var combat_engage_dist: float = 4.0
@@ -48,11 +66,16 @@ var target: Node3D = null
 var combat_action_timer: float = 0.0
 var attack_cooldown_timer: float = 0.0
 var dodge_cooldown_timer: float = 0.0
+var kick_cooldown_timer: float = 0.0
+var block_hold_timer: float = 0.0
 var approach_time_elapsed: float = 0.0
 
 # Pending reaction
 var is_dodge_pending: bool = false
 var pending_dodge_timer: float = 0.0
+var is_defense_pending: bool = false
+var pending_defense_timer: float = 0.0
+var pending_defense_action: int = 0 # 1 = dodge, 2 = block, 3 = parry
 var _has_reacted_to_attack: bool = false
 var current_orbit_movement: Vector2 = Vector2.ZERO
 
@@ -80,19 +103,38 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(actor) or not actor.is_alive():
 		return
 
-	if actor.is_staggered or actor.is_dashing or actor.is_attacking:
+	if actor.is_staggered or actor.is_dashing or actor.is_attacking or actor.is_kicking:
 		is_dodge_pending = false
+		is_defense_pending = false
 		return
 
 	if dodge_cooldown_timer > 0.0:
 		dodge_cooldown_timer -= delta
+
+	if kick_cooldown_timer > 0.0:
+		kick_cooldown_timer -= delta
+
+	# Process block hold countdown
+	if block_hold_timer > 0.0:
+		block_hold_timer -= delta
+		if block_hold_timer <= 0.0:
+			if not (is_dummy and dummy_always_block) and actor.is_blocking():
+				actor.cmd_block_release()
+
+	# Process delayed reaction defense (dodge, block, parry)
+	if is_defense_pending:
+		pending_defense_timer -= delta
+		if pending_defense_timer <= 0.0:
+			is_defense_pending = false
+			if not is_dummy and not actor.is_dashing and not actor.is_staggered and not actor.is_kicking:
+				_execute_pending_defense()
 
 	# Process delayed reaction dodge
 	if is_dodge_pending:
 		pending_dodge_timer -= delta
 		if pending_dodge_timer <= 0.0:
 			is_dodge_pending = false
-			if not is_dummy and not actor.is_dashing and not actor.is_staggered:
+			if not is_dummy and not actor.is_dashing and not actor.is_staggered and not actor.is_kicking:
 				_execute_random_dodge()
 
 	# Validate target
@@ -162,7 +204,28 @@ func _process_combat(delta: float) -> void:
 		current_state = State.CHASE
 		return
 
-	# Dodge reaction check
+	if is_dummy and dummy_always_block:
+		if not actor.is_blocking() and not actor.is_staggered and not actor.is_dashing:
+			actor.cmd_block_start()
+		return
+
+	# Counter-kick against turtling player holding block
+	if not is_dummy and can_kick and kick_cooldown_timer <= 0.0 and dist <= kick_trigger_dist:
+		var is_player_blocking: bool = false
+		if target.has_method("is_blocking"):
+			is_player_blocking = target.is_blocking()
+		elif "defense_component" in target and is_instance_valid(target.defense_component):
+			is_player_blocking = target.defense_component.is_blocking()
+
+		if is_player_blocking and not actor.is_attacking and not actor.is_kicking:
+			if randf() <= kick_chance_on_blocking_player:
+				if actor.is_blocking():
+					actor.cmd_block_release()
+				actor.cmd_kick()
+				kick_cooldown_timer = randf_range(kick_cooldown_min, kick_cooldown_max)
+				return
+
+	# Dodge / block reaction check
 	if _check_dodge_reaction(dist):
 		return
 
@@ -203,6 +266,11 @@ func _process_combat(delta: float) -> void:
 
 
 func _pick_new_orbit_action() -> void:
+	# Drop block if stamina gets dangerously low
+	if actor.is_blocking() and not (is_dummy and dummy_always_block):
+		if actor.stamina_component and actor.stamina_component.current_stamina < 20.0:
+			actor.cmd_block_release()
+
 	var roll := randf()
 	if roll < 0.4:
 		current_orbit_movement = Vector2(1.0, 0.0) # Strafe right
@@ -213,6 +281,11 @@ func _pick_new_orbit_action() -> void:
 	else:
 		current_orbit_movement = Vector2.ZERO # Combat pause
 		combat_action_timer = randf_range(0.6, 1.2)
+
+	# Tactical blocking while maneuvering in combat
+	if not is_dummy and can_block and randf() <= tactical_block_chance and not actor.is_blocking():
+		actor.cmd_block_start()
+		block_hold_timer = randf_range(block_duration_min, block_duration_max)
 
 
 func _process_attack_approach(delta: float) -> void:
@@ -252,7 +325,7 @@ func _process_attack_approach(delta: float) -> void:
 
 
 func _check_dodge_reaction(dist: float) -> bool:
-	if is_dummy or not can_dodge or actor.is_dashing or is_dodge_pending:
+	if is_dummy or actor.is_dashing or is_dodge_pending or is_defense_pending:
 		return false
 	if not is_instance_valid(target) or not ("is_attacking" in target):
 		return false
@@ -268,17 +341,51 @@ func _check_dodge_reaction(dist: float) -> bool:
 	# Target is attacking: check threat range
 	if dist <= dodge_trigger_distance:
 		_has_reacted_to_attack = true
+		var delay := randf_range(reaction_time_min, reaction_time_max)
+		var wants_dodge: bool = can_dodge and (randf() <= dodge_chance)
 		var effective_cooldown := 0.0 if dodge_chance >= 0.99 else dodge_cooldown_timer
-		if effective_cooldown <= 0.0 and randf() <= dodge_chance:
-			var delay := randf_range(reaction_time_min, reaction_time_max)
+
+		if wants_dodge and effective_cooldown <= 0.0:
+			pending_defense_action = 1 # Dodge
 			if delay <= 0.001:
 				_execute_random_dodge()
 			else:
-				is_dodge_pending = true
-				pending_dodge_timer = delay
+				is_defense_pending = true
+				pending_defense_timer = delay
+			return true
+		elif can_block and (randf() <= block_chance):
+			if randf() <= parry_chance:
+				pending_defense_action = 3 # Parry (block + deflect)
+			else:
+				pending_defense_action = 2 # Block (passive guard)
+			if delay <= 0.001:
+				_execute_pending_defense()
+			else:
+				is_defense_pending = true
+				pending_defense_timer = delay
 			return true
 
 	return false
+
+
+func _execute_pending_defense() -> void:
+	if not is_instance_valid(actor) or not actor.is_alive():
+		return
+	if actor.is_staggered or actor.is_dashing or actor.is_attacking or actor.is_kicking:
+		return
+
+	match pending_defense_action:
+		1:
+			_execute_random_dodge()
+		2:
+			# Passive block (hold guard)
+			actor.cmd_block_start()
+			block_hold_timer = randf_range(block_duration_min, block_duration_max)
+		3:
+			# Block + active parry window
+			actor.cmd_block_start()
+			actor.cmd_parry()
+			block_hold_timer = randf_range(block_duration_min, block_duration_max)
 
 
 func _execute_random_dodge() -> void:

@@ -6,11 +6,28 @@ signal attack_hitbox_opened
 signal attack_hitbox_closed
 signal attack_finished
 
+enum InsufficientStaminaPolicy {
+	SLOW_ATTACK,
+	IGNORE
+}
+
 @export var weapon_data: WeaponData = null
 @export var hitbox_scene: PackedScene = preload("res://scenes/combat/hitbox.tscn")
 @export var target_collision_mask: int = 4 # Default scans enemies (layer 4)
 
+@export_group("Stamina")
+## Base stamina cost for swinging weapon (overridden by WeaponData.stamina_cost if > 0).
+@export var stamina_cost: float = 20.0
+## Behavior when current stamina is less than the required attack cost.
+@export var insufficient_stamina_policy: InsufficientStaminaPolicy = InsufficientStaminaPolicy.SLOW_ATTACK
+## Speed multiplier for exhausted attack (0.5 = 2x slower, for D&D realism).
+@export var exhausted_attack_speed: float = 0.5
+## Minimum stamina required to initiate an attack (if policy is SLOW_ATTACK).
+@export var min_stamina_to_attack: float = 0.0
+
 var is_attacking: bool = false
+var is_exhausted_attack: bool = false
+var attack_speed_scale: float = 1.0
 var attack_time_elapsed: float = 0.0
 
 var actor: Node3D = null
@@ -47,11 +64,30 @@ func start_attack() -> bool:
 	if is_attacking:
 		return false
 
+	var cost := weapon_data.stamina_cost if (is_instance_valid(weapon_data) and weapon_data.stamina_cost > 0.0) else stamina_cost
+	is_exhausted_attack = false
+	attack_speed_scale = 1.0
+
+	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+		var stam: StaminaComponent = actor.stamina_component
+		if stam.can_afford(cost):
+			stam.consume(cost)
+		else:
+			# Not enough stamina for standard attack
+			if insufficient_stamina_policy == InsufficientStaminaPolicy.SLOW_ATTACK and stam.current_stamina >= min_stamina_to_attack:
+				stam.consume(stam.current_stamina)
+				is_exhausted_attack = true
+				attack_speed_scale = exhausted_attack_speed
+				print("[%s] EXHAUSTED ATTACK! Low stamina, swinging weapon at %.1fx speed!" % [actor.name, attack_speed_scale])
+			else:
+				print("[%s] Cannot attack! Insufficient stamina (need %.1f, have %.1f)." % [actor.name, cost, stam.current_stamina])
+				return false
+
 	is_attacking = true
 	attack_time_elapsed = 0.0
 
 	if is_instance_valid(actor) and actor.has_method("play_action"):
-		actor.play_action(weapon_data.action_anim_name)
+		actor.play_action(weapon_data.action_anim_name, attack_speed_scale)
 
 	attack_started.emit()
 	return true
@@ -61,7 +97,8 @@ func process_attack(delta: float) -> void:
 	if not is_attacking:
 		return
 
-	attack_time_elapsed += delta
+	var effective_delta := delta * attack_speed_scale
+	attack_time_elapsed += effective_delta
 
 	# Phase 1: Windup
 	if attack_time_elapsed < weapon_data.windup_time:
@@ -77,7 +114,7 @@ func process_attack(delta: float) -> void:
 
 		# Forward lunge along actor facing
 		if is_instance_valid(actor) and actor.has_method("apply_attack_lunge"):
-			actor.apply_attack_lunge(weapon_data.lunge_speed, delta)
+			actor.apply_attack_lunge(weapon_data.lunge_speed * attack_speed_scale, delta)
 
 	# Phase 3: Recovery
 	else:
@@ -95,7 +132,12 @@ func cancel_attack() -> void:
 	if is_instance_valid(weapon_hitbox):
 		weapon_hitbox.set_active(false)
 	is_attacking = false
+	is_exhausted_attack = false
+	attack_speed_scale = 1.0
 	attack_time_elapsed = 0.0
+	if is_instance_valid(actor) and is_instance_valid(actor.animation_tree):
+		if "parameters/ActionTimeScale/scale" in actor.animation_tree:
+			actor.animation_tree.set("parameters/ActionTimeScale/scale", 1.0)
 	attack_finished.emit()
 
 

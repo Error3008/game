@@ -16,12 +16,19 @@ animation = &"Combat_Dash_L"
 fadein_time = 0.08
 fadeout_time = 0.15
 
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_kick"]
+animation = &"Combat_Kick"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_block_impact"]
+animation = &"Block_Impact"
+
 [sub_resource type="AnimationNodeTransition" id="AnimationNodeTransition_actions"]
+input_count = 8
 input_0/name = "heavy_attack"
 input_0/auto_advance = false
 input_0/break_loop_at_end = false
 input_0/reset = true
-input_1/name = "light_attack"
+input_1/name = "kick"
 input_1/auto_advance = false
 input_1/break_loop_at_end = false
 input_1/reset = true
@@ -45,6 +52,10 @@ input_6/name = "parry"
 input_6/auto_advance = false
 input_6/break_loop_at_end = false
 input_6/reset = true
+input_7/name = "block_impact"
+input_7/auto_advance = false
+input_7/break_loop_at_end = false
+input_7/reset = true
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_block_loop"]
 animation = &"Block"
@@ -121,9 +132,11 @@ blend_point_2/pos = 1.0
 blend_point_2/name = &"2"
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_parry"]
-animation = &"Combat_Dash_Fwd"
+animation = &"Parry_Success"
 
 [sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_speed"]
+
+[sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_action"]
 
 [sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_root"]
 graph_offset = Vector2(-495.94406, 538.637)
@@ -142,6 +155,8 @@ nodes/CombatMovement/node = SubResource("AnimationNodeBlendSpace2D_combat")
 nodes/CombatMovement/position = Vector2(-220, 240)
 nodes/HeavyAttack/node = SubResource("AnimationNodeAnimation_heavy_slash")
 nodes/HeavyAttack/position = Vector2(-60, 400)
+nodes/KickAnim/node = SubResource("AnimationNodeAnimation_kick")
+nodes/KickAnim/position = Vector2(-60, 480)
 nodes/DashFwd/node = SubResource("AnimationNodeAnimation_dash_fwd")
 nodes/DashFwd/position = Vector2(-60, 560)
 nodes/DashBwd/node = SubResource("AnimationNodeAnimation_dash_bwd")
@@ -150,13 +165,17 @@ nodes/ParryAnim/node = SubResource("AnimationNodeAnimation_parry")
 nodes/ParryAnim/position = Vector2(-60, 1260)
 nodes/ActionSelect/node = SubResource("AnimationNodeTransition_actions")
 nodes/ActionSelect/position = Vector2(340, 400)
+nodes/ActionTimeScale/node = SubResource("AnimationNodeTimeScale_action")
+nodes/ActionTimeScale/position = Vector2(480, 400)
 nodes/ActionOneShot/node = SubResource("AnimationNodeOneShot_action")
 nodes/ActionOneShot/position = Vector2(620, 180)
 nodes/DashLeft/node = SubResource("AnimationNodeAnimation_dqkch")
 nodes/DashLeft/position = Vector2(-60, 900)
 nodes/DashRight/node = SubResource("AnimationNodeAnimation_qlg0r")
 nodes/DashRight/position = Vector2(-60, 1080)
-node_connections = [&"output", 0, &"ActionOneShot", &"SpeedScale", 0, &"CombatMode", &"BlockMode", 0, &"SpeedScale", &"BlockMode", 1, &"BlockLoop", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement", &"ActionSelect", 0, &"HeavyAttack", &"ActionSelect", 2, &"DashFwd", &"ActionSelect", 3, &"DashBwd", &"ActionSelect", 4, &"DashLeft", &"ActionSelect", 5, &"DashRight", &"ActionSelect", 6, &"ParryAnim", &"ActionOneShot", 0, &"BlockMode", &"ActionOneShot", 1, &"ActionSelect"]
+nodes/BlockImpactAnim/node = SubResource("AnimationNodeAnimation_block_impact")
+nodes/BlockImpactAnim/position = Vector2(-60, 1440)
+node_connections = [&"output", 0, &"ActionOneShot", &"SpeedScale", 0, &"CombatMode", &"BlockMode", 0, &"SpeedScale", &"BlockMode", 1, &"BlockLoop", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement", &"ActionSelect", 0, &"HeavyAttack", &"ActionSelect", 1, &"KickAnim", &"ActionSelect", 2, &"DashFwd", &"ActionSelect", 3, &"DashBwd", &"ActionSelect", 4, &"DashLeft", &"ActionSelect", 5, &"DashRight", &"ActionSelect", 6, &"ParryAnim", &"ActionSelect", 7, &"BlockImpactAnim", &"ActionTimeScale", 0, &"ActionSelect", &"ActionOneShot", 0, &"BlockMode", &"ActionOneShot", 1, &"ActionTimeScale"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_block"]
 shading_mode = 0
@@ -185,6 +204,7 @@ shape = SubResource("CapsuleShape3D_player")
 tree_root = SubResource("AnimationNodeBlendTree_root")
 anim_player = NodePath("../AnimationPlayer")
 parameters/SpeedScale/scale = 1.0
+parameters/ActionTimeScale/scale = 1.0
 parameters/BlockMode/blend_amount = 0.0
 parameters/CombatMode/blend_amount = 0.0
 parameters/Locomotion/blend_position = 0.0

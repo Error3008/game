@@ -61,6 +61,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			_trigger_directional_dash()
 
+	# Kick input (strictly in combat mode with target, and NOT while holding block)
+	if event.is_action_pressed("kick"):
+		if not is_instance_valid(actor.current_target):
+			return
+		if actor.is_blocking() or Input.is_action_pressed("block"):
+			return
+		if not actor.is_attacking and not actor.is_dashing and not actor.is_kicking:
+			actor.cmd_kick()
+
 
 func _physics_process(_delta: float) -> void:
 	if not is_instance_valid(actor) or not actor.is_alive():
@@ -70,14 +79,14 @@ func _physics_process(_delta: float) -> void:
 
 	# Continuous block hold sync
 	if Input.is_action_pressed("block") and is_instance_valid(actor.current_target):
-		if not actor.is_blocking() and not actor.is_attacking and not actor.is_dashing:
+		if not actor.is_blocking() and not actor.is_attacking and not actor.is_dashing and not actor.is_kicking:
 			actor.cmd_block_start()
 	elif not Input.is_action_pressed("block"):
 		if actor.is_blocking() and actor.defense_component and actor.defense_component.is_passive_blocking():
 			actor.cmd_block_release()
 
 	# Process locomotion input
-	if actor.is_blocking() or actor.is_attacking or actor.is_dashing or actor.is_staggered:
+	if actor.is_blocking() or actor.is_attacking or actor.is_dashing or actor.is_kicking or actor.is_staggered:
 		return
 
 	var input_dir := Input.get_vector("a", "d", "w", "s")

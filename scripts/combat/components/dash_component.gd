@@ -25,6 +25,10 @@ const DASH_ANIM_MAP: Dictionary = {
 @export var dash_iframe_start: float = 0.04
 @export var dash_iframe_end: float = 0.32
 
+@export_group("Stamina")
+## Stamina consumed per dash maneuver.
+@export var stamina_cost: float = 25.0
+
 var is_dashing: bool = false
 var dash_time_elapsed: float = 0.0
 var dash_cooldown_timer: float = 0.0
@@ -61,12 +65,23 @@ func process_dash(delta: float) -> void:
 
 
 func can_dash() -> bool:
-	return not is_dashing and dash_cooldown_timer <= 0.0
+	if is_dashing or dash_cooldown_timer > 0.0:
+		return false
+	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+		if not actor.stamina_component.can_afford(stamina_cost):
+			return false
+	return true
 
 
 func start_dash(chosen_dir: DashDirection) -> bool:
 	if not can_dash():
+		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+			if not actor.stamina_component.can_afford(stamina_cost):
+				print("[%s] Cannot dash! Insufficient stamina (need %.1f, have %.1f)." % [actor.name, stamina_cost, actor.stamina_component.current_stamina])
 		return false
+
+	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+		actor.stamina_component.consume(stamina_cost)
 
 	is_dashing = true
 	dash_time_elapsed = 0.0

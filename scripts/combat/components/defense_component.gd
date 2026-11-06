@@ -6,6 +6,8 @@ signal block_ended
 signal parry_attempted
 signal parry_successful(attacker: Node3D)
 signal parry_failed_penalty
+signal guard_broken(attacker: Node3D)
+signal block_impact(attacker: Node3D)
 
 enum BlockState {
 	NONE,
@@ -23,7 +25,17 @@ enum BlockState {
 @export var block_blend_speed: float = 10.0
 # Cosine of 70 degrees (~0.342): protects a 140-degree frontal cone
 @export var block_angle_threshold: float = 0.34
+@export var block_impact_speed_scale: float = 1.0
+@export var parry_speed_scale: float = 1.0
 @export var debug_block_visual: bool = true
+
+@export_group("Stamina & Guard Break")
+## Stamina consumed when an incoming attack is absorbed by passive block.
+@export var block_impact_stamina_cost: float = 35.0
+## Stamina bonus restored when executing a successful parry in the gold window.
+@export var parry_bonus_stamina: float = 15.0
+## Stagger duration applied when defender's stamina drops to 0 during passive block.
+@export var guard_break_stagger_duration: float = 1.5
 
 var block_state: BlockState = BlockState.NONE
 var parry_timer: float = 0.0
@@ -37,6 +49,14 @@ var _indicator_mat: StandardMaterial3D = null
 
 func setup(parent_actor: Node3D) -> void:
 	actor = parent_actor
+	if is_instance_valid(actor) and "stats" in actor and actor.stats != null:
+		var s: CharacterStats = actor.stats
+		if s.block_impact_stamina_cost > 0.0:
+			block_impact_stamina_cost = s.block_impact_stamina_cost
+		if s.parry_bonus_stamina >= 0.0:
+			parry_bonus_stamina = s.parry_bonus_stamina
+		if s.guard_break_stagger_duration > 0.0:
+			guard_break_stagger_duration = s.guard_break_stagger_duration
 	_setup_debug_visual()
 
 
@@ -84,6 +104,11 @@ func start_block() -> bool:
 	if block_state == BlockState.PARRY_PENALTY:
 		is_block_held = true
 		return false
+
+	# Cannot raise guard if stamina is depleted
+	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+		if actor.stamina_component.current_stamina <= 0.0:
+			return false
 
 	is_block_held = true
 	if block_state == BlockState.NONE:
@@ -188,6 +213,10 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 		result["knockback_taken"] = Vector3.ZERO
 		result["was_parried"] = true
 
+		# Perfect parry reward: restore stamina (costs 0!)
+		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+			actor.stamina_component.restore(parry_bonus_stamina)
+
 		if is_instance_valid(attacker):
 			if attacker.has_method("stagger"):
 				attacker.stagger(0.8, actor)
@@ -211,6 +240,22 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 		result["damage_taken"] = amount * (1.0 - block_damage_reduction)
 		result["knockback_taken"] = knockback * (1.0 - block_knockback_reduction)
 		result["was_blocked"] = true
+
+		# Consume stamina on passive block impact
+		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
+			var stam: StaminaComponent = actor.stamina_component
+			stam.consume(block_impact_stamina_cost)
+			if stam.current_stamina <= 0.0:
+				result["was_guard_broken"] = true
+				end_block()
+				guard_broken.emit(attacker)
+				stam.trigger_guard_break(attacker)
+				if actor.has_method("stagger"):
+					actor.stagger(guard_break_stagger_duration, attacker)
+
+		if not result.get("was_guard_broken", false):
+			block_impact.emit(attacker)
+
 		return result
 
 	# 3. Penalty Window Warning

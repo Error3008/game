@@ -15,6 +15,8 @@ var health_component: HealthComponent = null
 var defense_component: DefenseComponent = null
 var attack_component: MeleeAttackComponent = null
 var dash_component: DashComponent = null
+var stamina_component: StaminaComponent = null
+var kick_component: KickComponent = null
 
 # Target & Combat State
 var current_target: Node3D = null
@@ -42,6 +44,10 @@ var attack_active_end_time: float:
 			return attack_component.weapon_data.active_end_time
 		return 0.75
 
+var is_kicking: bool:
+	get:
+		return kick_component.is_kicking if is_instance_valid(kick_component) else false
+
 var is_dashing: bool:
 	get:
 		return dash_component.is_dashing if is_instance_valid(dash_component) else false
@@ -53,6 +59,14 @@ var current_health: float:
 var max_health: float:
 	get:
 		return health_component.max_health if is_instance_valid(health_component) else 100.0
+
+var current_stamina: float:
+	get:
+		return stamina_component.current_stamina if is_instance_valid(stamina_component) else 100.0
+
+var max_stamina: float:
+	get:
+		return stamina_component.max_stamina if is_instance_valid(stamina_component) else 100.0
 
 
 func _ready() -> void:
@@ -81,6 +95,8 @@ func _discover_and_setup_components() -> void:
 	defense_component = get_node_or_null("DefenseComponent") as DefenseComponent
 	if is_instance_valid(defense_component):
 		defense_component.setup(self)
+		if not defense_component.parry_successful.is_connected(_on_parry_successful):
+			defense_component.parry_successful.connect(_on_parry_successful)
 
 	attack_component = get_node_or_null("MeleeAttackComponent") as MeleeAttackComponent
 	if is_instance_valid(attack_component):
@@ -89,6 +105,21 @@ func _discover_and_setup_components() -> void:
 	dash_component = get_node_or_null("DashComponent") as DashComponent
 	if is_instance_valid(dash_component):
 		dash_component.setup(self)
+
+	stamina_component = get_node_or_null("StaminaComponent") as StaminaComponent
+	if not is_instance_valid(stamina_component):
+		stamina_component = StaminaComponent.new()
+		stamina_component.name = "StaminaComponent"
+		add_child(stamina_component)
+	stamina_component.setup(self)
+	stamina_component.init_from_stats(stats)
+
+	kick_component = get_node_or_null("KickComponent") as KickComponent
+	if not is_instance_valid(kick_component):
+		kick_component = KickComponent.new()
+		kick_component.name = "KickComponent"
+		add_child(kick_component)
+	kick_component.setup(self, hitbox_target_mask)
 
 
 func _physics_process(delta: float) -> void:
@@ -109,6 +140,10 @@ func _physics_process(delta: float) -> void:
 			velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
 			move_and_slide()
 		return
+
+	# Always tick stamina component (regen & delay)
+	if is_instance_valid(stamina_component):
+		stamina_component.update(delta)
 
 	# Always tick dash component (cooldown countdown + active dash movement)
 	if is_instance_valid(dash_component):
@@ -144,6 +179,14 @@ func _physics_process(delta: float) -> void:
 		elif not (attack_component.attack_time_elapsed < attack_component.weapon_data.active_end_time):
 			velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
 			velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
+
+	# 3.5. Process kick component
+	elif is_kicking and is_instance_valid(kick_component):
+		kick_component.process_kick(delta)
+		target_combat_mode = 1.0
+		target_combat_movement = Vector2.ZERO
+		velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
 
 	# 4. Process defense component
 	elif is_blocking() and is_instance_valid(defense_component):
@@ -182,7 +225,7 @@ func _physics_process(delta: float) -> void:
 # --- Command Interface (API for Controllers) ---
 
 func cmd_move(world_dir: Vector3, is_running: bool) -> void:
-	if is_staggered or is_attacking or is_dashing or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_blocking():
 		return
 
 	target_combat_mode = 0.0
@@ -199,7 +242,7 @@ func cmd_move(world_dir: Vector3, is_running: bool) -> void:
 
 
 func cmd_combat_move(lateral: float, forward: float, speed_override: float = -1.0) -> void:
-	if is_staggered or is_attacking or is_dashing or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_blocking():
 		return
 
 	target_combat_mode = 1.0
@@ -242,7 +285,7 @@ func cmd_face_direction(direction: Vector3, delta: float, speed_scale: float = 1
 
 
 func cmd_attack() -> bool:
-	if is_staggered or is_dashing:
+	if is_staggered or is_dashing or is_kicking:
 		return false
 	if is_blocking():
 		return cmd_parry()
@@ -250,6 +293,18 @@ func cmd_attack() -> bool:
 		target_combat_movement = Vector2.ZERO
 		target_combat_mode = 1.0
 		return attack_component.start_attack()
+	return false
+
+
+func cmd_kick() -> bool:
+	if is_staggered or is_dashing or is_attacking or is_kicking:
+		return false
+	if is_blocking():
+		return false
+	if is_instance_valid(kick_component):
+		target_combat_movement = Vector2.ZERO
+		target_combat_mode = 1.0
+		return kick_component.start_kick()
 	return false
 
 
@@ -268,11 +323,18 @@ func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
 		else:
 			return false
 
+	# Dodge cancel: can cancel kick if in recovery phase
+	if is_kicking and is_instance_valid(kick_component):
+		if kick_component.is_in_recovery():
+			kick_component.cancel_kick()
+		else:
+			return false
+
 	return dash_component.start_dash(chosen_dir)
 
 
 func cmd_block_start() -> bool:
-	if is_staggered or is_dashing or is_attacking or not is_instance_valid(defense_component):
+	if is_staggered or is_dashing or is_attacking or is_kicking or not is_instance_valid(defense_component):
 		return false
 	return defense_component.start_block()
 
@@ -287,7 +349,7 @@ func cmd_parry() -> bool:
 		return false
 	var success := defense_component.trigger_parry()
 	if success:
-		play_action(&"parry")
+		play_parry_success()
 	return success
 
 
@@ -322,13 +384,18 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 		if eval["was_parried"]:
 			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 			print("[%s] PERFECT PARRY against %s! Negated %.1f damage with 0 knockback." % [name, att_name, amount])
+			play_parry_success()
 			return
 
 		if eval["was_blocked"]:
 			final_damage = eval["damage_taken"]
 			final_knockback = eval["knockback_taken"]
 			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
-			print("[%s] Blocked attack from %s (took %.1f of %.1f damage)." % [name, att_name, final_damage, amount])
+			if eval.get("was_guard_broken", false):
+				print("[%s] GUARD BROKEN by %s! Defenses collapsed." % [name, att_name])
+			else:
+				print("[%s] Blocked attack from %s (took %.1f of %.1f damage)." % [name, att_name, final_damage, amount])
+				play_block_impact()
 
 		if eval["was_penalty"]:
 			print("[%s] STRUCK DURING PARRY PENALTY! Defenses broken." % name)
@@ -350,6 +417,9 @@ func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:
 
 	if is_attacking and is_instance_valid(attack_component):
 		attack_component.cancel_attack()
+
+	if is_kicking and is_instance_valid(kick_component):
+		kick_component.cancel_kick()
 
 	if is_dashing and is_instance_valid(dash_component):
 		dash_component.end_dash()
@@ -394,6 +464,8 @@ func _on_died(attacker: Node3D) -> void:
 	is_staggered = false
 	if is_attacking and is_instance_valid(attack_component):
 		attack_component.cancel_attack()
+	if is_kicking and is_instance_valid(kick_component):
+		kick_component.cancel_kick()
 	if is_dashing and is_instance_valid(dash_component):
 		dash_component.end_dash()
 	if is_blocking() and is_instance_valid(defense_component):
@@ -458,16 +530,45 @@ func get_right_basis() -> Vector3:
 
 # --- Animation & Action Management ---
 
-func play_action(action_name: StringName) -> void:
+func _on_parry_successful(_attacker: Node3D) -> void:
+	play_parry_success()
+
+
+func play_action(action_name: StringName, speed_scale: float = 1.0) -> void:
 	if not is_instance_valid(animation_tree):
 		return
-	animation_tree.set("parameters/ActionSelect/transition_request", str(action_name))
+	if "parameters/ActionTimeScale/scale" in animation_tree:
+		animation_tree.set("parameters/ActionTimeScale/scale", speed_scale)
+	var state_name := str(action_name)
+	if state_name == "parry_success":
+		state_name = "parry"
+	animation_tree.set("parameters/ActionSelect/transition_request", state_name)
 	animation_tree.set("parameters/ActionOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+
+
+func play_block_impact(speed_scale: float = -1.0) -> void:
+	var speed := 1.0
+	if speed_scale > 0.0:
+		speed = speed_scale
+	elif is_instance_valid(defense_component):
+		speed = defense_component.block_impact_speed_scale
+	play_action(&"block_impact", speed)
+
+
+func play_parry_success(speed_scale: float = -1.0) -> void:
+	var speed := 1.0
+	if speed_scale > 0.0:
+		speed = speed_scale
+	elif is_instance_valid(defense_component):
+		speed = defense_component.parry_speed_scale
+	play_action(&"parry", speed)
 
 
 func abort_action() -> void:
 	if not is_instance_valid(animation_tree):
 		return
+	if "parameters/ActionTimeScale/scale" in animation_tree:
+		animation_tree.set("parameters/ActionTimeScale/scale", 1.0)
 	animation_tree.set("parameters/ActionOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_ABORT)
 
 
