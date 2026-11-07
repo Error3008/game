@@ -11,7 +11,12 @@ enum InsufficientStaminaPolicy {
 	IGNORE
 }
 
+## Текущее оружие/режим удара. Выставляется в start_attack() из heavy/light.
 @export var weapon_data: WeaponData = null
+## Тяжёлый удар (по умолчанию = weapon_data из сцены/кода).
+var heavy_weapon_data: WeaponData = null
+## Лёгкий удар (быстрый, дешёвый, слабый).
+@export var light_weapon_data: WeaponData = null
 @export var hitbox_scene: PackedScene = preload("res://scenes/combat/hitbox.tscn")
 @export var target_collision_mask: int = 4 # Default scans enemies (layer 4)
 
@@ -42,6 +47,8 @@ func _ready() -> void:
 func setup(parent_actor: Node3D, collision_mask: int = 4) -> void:
 	actor = parent_actor
 	target_collision_mask = collision_mask
+	if heavy_weapon_data == null:
+		heavy_weapon_data = weapon_data
 	_setup_weapon_hitbox()
 
 
@@ -60,9 +67,14 @@ func _setup_weapon_hitbox() -> void:
 		weapon_node.add_child(weapon_hitbox)
 
 
-func start_attack() -> bool:
+func start_attack(light: bool = false) -> bool:
 	if is_attacking:
 		return false
+
+	if light and is_instance_valid(light_weapon_data):
+		weapon_data = light_weapon_data
+	elif is_instance_valid(heavy_weapon_data):
+		weapon_data = heavy_weapon_data
 
 	var cost := weapon_data.stamina_cost if (is_instance_valid(weapon_data) and weapon_data.stamina_cost > 0.0) else stamina_cost
 	is_exhausted_attack = false

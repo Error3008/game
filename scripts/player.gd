@@ -28,6 +28,7 @@ func _ready() -> void:
 		var atk := MeleeAttackComponent.new()
 		atk.name = "MeleeAttackComponent"
 		atk.weapon_data = preload("res://resources/weapons/greatsword.tres")
+		atk.light_weapon_data = preload("res://resources/weapons/greatsword_light.tres")
 		add_child(atk)
 	if not has_node("DashComponent"):
 		var dsh := DashComponent.new()

@@ -23,7 +23,7 @@ animation = &"Combat_Kick"
 animation = &"Block_Impact"
 
 [sub_resource type="AnimationNodeTransition" id="AnimationNodeTransition_actions"]
-input_count = 8
+input_count = 13
 input_0/name = "heavy_attack"
 input_0/auto_advance = false
 input_0/break_loop_at_end = false
@@ -56,6 +56,26 @@ input_7/name = "block_impact"
 input_7/auto_advance = false
 input_7/break_loop_at_end = false
 input_7/reset = true
+input_8/name = "light_attack"
+input_8/auto_advance = false
+input_8/break_loop_at_end = false
+input_8/reset = true
+input_9/name = "hit_react"
+input_9/auto_advance = false
+input_9/break_loop_at_end = false
+input_9/reset = true
+input_10/name = "stagger"
+input_10/auto_advance = false
+input_10/break_loop_at_end = false
+input_10/reset = true
+input_11/name = "death"
+input_11/auto_advance = false
+input_11/break_loop_at_end = false
+input_11/reset = true
+input_12/name = "heal"
+input_12/auto_advance = false
+input_12/break_loop_at_end = false
+input_12/reset = true
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_block_loop"]
 animation = &"Block"
@@ -107,7 +127,7 @@ animation = &"Combat_Dash_Fwd"
 animation = &"Combat_Dash_R"
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_heavy_slash"]
-animation = &"Combat_Heavy_Slash"
+animation = &"Combat_Heavy_Slash_v2"
 
 [sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_idle"]
 animation = &"Idle"
@@ -137,6 +157,21 @@ animation = &"Parry_Success"
 [sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_speed"]
 
 [sub_resource type="AnimationNodeTimeScale" id="AnimationNodeTimeScale_action"]
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_lightattack"]
+animation = &"Combat_Light_Slash"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_hitreact"]
+animation = &"Hit_React"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_staggeranim"]
+animation = &"Stagger"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_deathanim"]
+animation = &"Death"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_healanim"]
+animation = &"Heal"
 
 [sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_root"]
 graph_offset = Vector2(-495.94406, 538.637)
@@ -175,7 +210,17 @@ nodes/DashRight/node = SubResource("AnimationNodeAnimation_qlg0r")
 nodes/DashRight/position = Vector2(-60, 1080)
 nodes/BlockImpactAnim/node = SubResource("AnimationNodeAnimation_block_impact")
 nodes/BlockImpactAnim/position = Vector2(-60, 1440)
-node_connections = [&"output", 0, &"ActionOneShot", &"SpeedScale", 0, &"CombatMode", &"BlockMode", 0, &"SpeedScale", &"BlockMode", 1, &"BlockLoop", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement", &"ActionSelect", 0, &"HeavyAttack", &"ActionSelect", 1, &"KickAnim", &"ActionSelect", 2, &"DashFwd", &"ActionSelect", 3, &"DashBwd", &"ActionSelect", 4, &"DashLeft", &"ActionSelect", 5, &"DashRight", &"ActionSelect", 6, &"ParryAnim", &"ActionSelect", 7, &"BlockImpactAnim", &"ActionTimeScale", 0, &"ActionSelect", &"ActionOneShot", 0, &"BlockMode", &"ActionOneShot", 1, &"ActionTimeScale"]
+nodes/LightAttack/node = SubResource("AnimationNodeAnimation_lightattack")
+nodes/LightAttack/position = Vector2(-60, 1620)
+nodes/HitReact/node = SubResource("AnimationNodeAnimation_hitreact")
+nodes/HitReact/position = Vector2(-60, 1800)
+nodes/StaggerAnim/node = SubResource("AnimationNodeAnimation_staggeranim")
+nodes/StaggerAnim/position = Vector2(-60, 1980)
+nodes/DeathAnim/node = SubResource("AnimationNodeAnimation_deathanim")
+nodes/DeathAnim/position = Vector2(-60, 2160)
+nodes/HealAnim/node = SubResource("AnimationNodeAnimation_healanim")
+nodes/HealAnim/position = Vector2(-60, 2340)
+node_connections = [&"output", 0, &"ActionOneShot", &"SpeedScale", 0, &"CombatMode", &"BlockMode", 0, &"SpeedScale", &"BlockMode", 1, &"BlockLoop", &"CombatMode", 0, &"Locomotion", &"CombatMode", 1, &"CombatMovement", &"ActionSelect", 0, &"HeavyAttack", &"ActionSelect", 1, &"KickAnim", &"ActionSelect", 2, &"DashFwd", &"ActionSelect", 3, &"DashBwd", &"ActionSelect", 4, &"DashLeft", &"ActionSelect", 5, &"DashRight", &"ActionSelect", 6, &"ParryAnim", &"ActionSelect", 7, &"BlockImpactAnim", &"ActionSelect", 8, &"LightAttack", &"ActionSelect", 9, &"HitReact", &"ActionSelect", 10, &"StaggerAnim", &"ActionSelect", 11, &"DeathAnim", &"ActionSelect", 12, &"HealAnim", &"ActionTimeScale", 0, &"ActionSelect", &"ActionOneShot", 0, &"BlockMode", &"ActionOneShot", 1, &"ActionTimeScale"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_block"]
 shading_mode = 0

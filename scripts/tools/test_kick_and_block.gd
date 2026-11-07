@@ -97,7 +97,7 @@ func _run_tests() -> void:
 
 	assert(hit_data["received"] == true, "Kick hit signal should have been emitted")
 	assert(hit_data["broke_guard"] == false, "Kick must NOT trigger Guard Break on non-blocking target")
-	assert(dummy.is_staggered == false, "Target without block should NOT be staggered for 1.5s")
+	assert(dummy.stagger_timer < 1.0, "Target without block should only get a short hit-react, NOT a 1.5s guard-break stagger")
 	assert(dummy.stamina_component.current_stamina == 100.0, "Target stamina should NOT be depleted")
 	assert(dummy.current_health == 90.0, "Target should only take 10 unblocked damage")
 	print("Non-blocking target after Kick: Staggered=%s, HP=%.1f, Stamina=%.1f" % [dummy.is_staggered, dummy.current_health, dummy.current_stamina])
@@ -111,6 +111,7 @@ func _run_tests() -> void:
 	dummy.global_position = Vector3(0.0, 0.0, -1.5)
 	player.pawn.rotation.y = atan2(dummy.global_position.x - player.global_position.x, dummy.global_position.z - player.global_position.z)
 	dummy.pawn.rotation.y = atan2(player.global_position.x - dummy.global_position.x, player.global_position.z - dummy.global_position.z)
+	dummy.is_staggered = false # сброс Hit_React из теста 3 (время в тесте не идёт)
 	dummy.cmd_block_start()
 	dummy.cmd_parry()
 	assert(dummy.defense_component.block_state == DefenseComponent.BlockState.ACTIVE_PARRY, "Dummy must be in active parry window")

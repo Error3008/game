@@ -10,6 +10,13 @@ var actor: CombatCharacter3D = null
 var spring_arm_pivot: Node3D = null
 var is_lock_enabled: bool = false
 
+@export_group("Attack Input")
+## ЛКМ/F: тап короче порога = лёгкая атака, удержание дольше порога = тяжёлая.
+@export var heavy_hold_threshold: float = 0.22
+
+var _attack_held: bool = false
+var _attack_hold_time: float = 0.0
+
 
 func _ready() -> void:
 	actor = get_parent() as CombatCharacter3D
@@ -43,8 +50,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if actor.is_blocking():
 			actor.cmd_parry()
-		elif not actor.is_attacking and not actor.is_dashing:
-			actor.cmd_attack()
+		else:
+			_attack_held = true
+			_attack_hold_time = 0.0
+
+	if event.is_action_released("attack") and _attack_held:
+		# Тап: отпустили до порога удержания -> лёгкая атака
+		_attack_held = false
+		_try_attack(true)
+
+	if event.is_action_pressed("heal"):
+		actor.cmd_heal()
 
 	# Block input (strictly in combat mode with target)
 	if event.is_action_pressed("block"):
@@ -77,16 +93,23 @@ func _physics_process(_delta: float) -> void:
 
 	_update_target_lock()
 
+	# Удержание атаки дольше порога -> тяжёлая
+	if _attack_held:
+		_attack_hold_time += _delta
+		if _attack_hold_time >= heavy_hold_threshold:
+			_attack_held = false
+			_try_attack(false)
+
 	# Continuous block hold sync
 	if Input.is_action_pressed("block") and is_instance_valid(actor.current_target):
-		if not actor.is_blocking() and not actor.is_attacking and not actor.is_dashing and not actor.is_kicking:
+		if not actor.is_blocking() and not actor.is_attacking and not actor.is_dashing and not actor.is_kicking and not actor.is_healing:
 			actor.cmd_block_start()
 	elif not Input.is_action_pressed("block"):
 		if actor.is_blocking() and actor.defense_component and actor.defense_component.is_passive_blocking():
 			actor.cmd_block_release()
 
 	# Process locomotion input
-	if actor.is_blocking() or actor.is_attacking or actor.is_dashing or actor.is_kicking or actor.is_staggered:
+	if actor.is_blocking() or actor.is_attacking or actor.is_dashing or actor.is_kicking or actor.is_healing or actor.is_staggered:
 		return
 
 	var input_dir := Input.get_vector("a", "d", "w", "s")
@@ -101,6 +124,17 @@ func _physics_process(_delta: float) -> void:
 		var world_dir := Vector3(cam_dir.x, 0.0, cam_dir.z).normalized()
 		var is_running := Input.is_action_pressed("shift")
 		actor.cmd_move(world_dir, is_running)
+
+
+func _try_attack(light: bool) -> void:
+	if not is_instance_valid(actor.current_target):
+		return
+	if actor.is_attacking or actor.is_dashing:
+		return
+	if light:
+		actor.cmd_attack_light()
+	else:
+		actor.cmd_attack()
 
 
 func _trigger_directional_dash() -> void:

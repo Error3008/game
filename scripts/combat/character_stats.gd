@@ -34,3 +34,11 @@ extends Resource
 @export var parry_bonus_stamina: float = 15.0
 @export var parry_attempt_stamina_cost: float = 0.0
 @export var guard_break_stagger_duration: float = 1.5
+
+@export_group("Healing")
+@export var heal_charges: int = 3
+@export var heal_amount: float = 40.0
+
+@export_group("Reactions")
+## Сколько секунд получатель не может действовать после чистого попадания (клип Hit_React ~0.5 с).
+@export var hit_react_stun_duration: float = 0.35

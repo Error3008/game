@@ -3,6 +3,18 @@ extends CharacterBody3D
 
 signal character_died(attacker: Node3D)
 
+# --- Имена состояний ActionSelect (AnimationTree) — единое место ---
+const ACTION_HEAVY: StringName = &"heavy_attack"
+const ACTION_LIGHT: StringName = &"light_attack"
+const ACTION_HIT_REACT: StringName = &"hit_react"
+const ACTION_STAGGER: StringName = &"stagger"
+const ACTION_DEATH: StringName = &"death"
+const ACTION_HEAL: StringName = &"heal"
+## Длительность клипа Stagger (с) — для масштаба времени под длительность оглушения.
+const STAGGER_CLIP_LENGTH: float = 1.17
+## Через сколько секунд после старта Death замораживаем позу трупа (клип 2.0 с, после 1.58 неподвижен).
+const DEATH_FREEZE_TIME: float = 1.75
+
 @export_group("Configuration")
 @export var stats: CharacterStats = null
 @export var hitbox_target_mask: int = 4 # Default 4 (scans enemies) for player, 2 for enemy
@@ -17,6 +29,7 @@ var attack_component: MeleeAttackComponent = null
 var dash_component: DashComponent = null
 var stamina_component: StaminaComponent = null
 var kick_component: KickComponent = null
+var heal_component: HealComponent = null
 
 # Target & Combat State
 var current_target: Node3D = null
@@ -47,6 +60,10 @@ var attack_active_end_time: float:
 var is_kicking: bool:
 	get:
 		return kick_component.is_kicking if is_instance_valid(kick_component) else false
+
+var is_healing: bool:
+	get:
+		return heal_component.is_healing if is_instance_valid(heal_component) else false
 
 var is_dashing: bool:
 	get:
@@ -121,6 +138,14 @@ func _discover_and_setup_components() -> void:
 		add_child(kick_component)
 	kick_component.setup(self, hitbox_target_mask)
 
+	heal_component = get_node_or_null("HealComponent") as HealComponent
+	if not is_instance_valid(heal_component):
+		heal_component = HealComponent.new()
+		heal_component.name = "HealComponent"
+		add_child(heal_component)
+	heal_component.setup(self)
+	heal_component.init_from_stats(stats)
+
 
 func _physics_process(delta: float) -> void:
 	if stats == null:
@@ -188,6 +213,13 @@ func _physics_process(delta: float) -> void:
 		velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
 		velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
 
+	# 3.6. Process heal component (стоим на месте, пока пьём)
+	elif is_healing and is_instance_valid(heal_component):
+		heal_component.process_heal(delta)
+		target_combat_movement = Vector2.ZERO
+		velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
+
 	# 4. Process defense component
 	elif is_blocking() and is_instance_valid(defense_component):
 		defense_component.process_defense(delta)
@@ -225,7 +257,7 @@ func _physics_process(delta: float) -> void:
 # --- Command Interface (API for Controllers) ---
 
 func cmd_move(world_dir: Vector3, is_running: bool) -> void:
-	if is_staggered or is_attacking or is_dashing or is_kicking or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_blocking():
 		return
 
 	target_combat_mode = 0.0
@@ -242,7 +274,7 @@ func cmd_move(world_dir: Vector3, is_running: bool) -> void:
 
 
 func cmd_combat_move(lateral: float, forward: float, speed_override: float = -1.0) -> void:
-	if is_staggered or is_attacking or is_dashing or is_kicking or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_blocking():
 		return
 
 	target_combat_mode = 1.0
@@ -285,19 +317,34 @@ func cmd_face_direction(direction: Vector3, delta: float, speed_scale: float = 1
 
 
 func cmd_attack() -> bool:
-	if is_staggered or is_dashing or is_kicking:
+	return _start_attack(false)
+
+
+func cmd_attack_light() -> bool:
+	return _start_attack(true)
+
+
+func _start_attack(light: bool) -> bool:
+	if is_staggered or is_dashing or is_kicking or is_healing:
 		return false
 	if is_blocking():
 		return cmd_parry()
 	if is_instance_valid(attack_component):
 		target_combat_movement = Vector2.ZERO
 		target_combat_mode = 1.0
-		return attack_component.start_attack()
+		return attack_component.start_attack(light)
 	return false
 
 
+func cmd_heal() -> bool:
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_blocking() or not is_instance_valid(heal_component):
+		return false
+	target_combat_movement = Vector2.ZERO
+	return heal_component.start_heal()
+
+
 func cmd_kick() -> bool:
-	if is_staggered or is_dashing or is_attacking or is_kicking:
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing:
 		return false
 	if is_blocking():
 		return false
@@ -309,7 +356,7 @@ func cmd_kick() -> bool:
 
 
 func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
-	if is_staggered or is_dashing or not is_instance_valid(dash_component):
+	if is_staggered or is_dashing or is_healing or not is_instance_valid(dash_component):
 		return false
 
 	# Cannot dash while blocking or holding guard
@@ -334,7 +381,7 @@ func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
 
 
 func cmd_block_start() -> bool:
-	if is_staggered or is_dashing or is_attacking or is_kicking or not is_instance_valid(defense_component):
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing or not is_instance_valid(defense_component):
 		return false
 	return defense_component.start_block()
 
@@ -377,6 +424,7 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 
 	var final_damage := amount
 	var final_knockback := knockback_impulse
+	var was_blocked := false
 
 	# 2. DefenseComponent evaluation (Block, Parry, Penalty, Backstab check)
 	if is_instance_valid(defense_component):
@@ -388,6 +436,7 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 			return
 
 		if eval["was_blocked"]:
+			was_blocked = true
 			final_damage = eval["damage_taken"]
 			final_knockback = eval["knockback_taken"]
 			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
@@ -406,7 +455,11 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 		var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 		print("[%s] Took %.1f damage from %s. Remaining HP: %.1f" % [name, final_damage, att_name, health_component.current_health])
 
-	# 4. Apply physical knockback
+	# 4. Hit reaction: чистое попадание прерывает текущее действие получателя
+	if is_alive() and not was_blocked and final_damage > 0.0 and not is_staggered:
+		_react_to_hit()
+
+	# 5. Apply physical knockback
 	velocity.x += final_knockback.x
 	velocity.z += final_knockback.z
 
@@ -415,19 +468,9 @@ func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:
 	if not is_alive():
 		return
 
-	if is_attacking and is_instance_valid(attack_component):
-		attack_component.cancel_attack()
-
-	if is_kicking and is_instance_valid(kick_component):
-		kick_component.cancel_kick()
-
-	if is_dashing and is_instance_valid(dash_component):
-		dash_component.end_dash()
-
-	if is_blocking() and is_instance_valid(defense_component):
-		defense_component.end_block()
-
+	_cancel_all_actions()
 	abort_action()
+	play_action(ACTION_STAGGER, STAGGER_CLIP_LENGTH / maxf(duration, 0.1))
 
 	is_staggered = true
 	stagger_timer = duration
@@ -447,6 +490,28 @@ func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:
 	print("[%s] STAGGERED for %.2fs! Action aborted." % [name, duration])
 
 
+## Отменяет всё текущее действие (атака, пинок, дэш, лечение, блок).
+func _cancel_all_actions() -> void:
+	if is_attacking and is_instance_valid(attack_component):
+		attack_component.cancel_attack()
+	if is_kicking and is_instance_valid(kick_component):
+		kick_component.cancel_kick()
+	if is_dashing and is_instance_valid(dash_component):
+		dash_component.end_dash()
+	if is_healing and is_instance_valid(heal_component):
+		heal_component.cancel_heal()
+	if is_blocking() and is_instance_valid(defense_component):
+		defense_component.end_block()
+
+
+func _react_to_hit() -> void:
+	_cancel_all_actions()
+	abort_action()
+	play_action(ACTION_HIT_REACT, 1.0)
+	is_staggered = true
+	stagger_timer = stats.hit_react_stun_duration
+
+
 func on_attack_deflected(by_node: Node3D) -> void:
 	stagger(0.8, by_node)
 
@@ -462,16 +527,12 @@ func is_blocking() -> bool:
 func _on_died(attacker: Node3D) -> void:
 	print("[%s] has DIED!" % name)
 	is_staggered = false
-	if is_attacking and is_instance_valid(attack_component):
-		attack_component.cancel_attack()
-	if is_kicking and is_instance_valid(kick_component):
-		kick_component.cancel_kick()
-	if is_dashing and is_instance_valid(dash_component):
-		dash_component.end_dash()
-	if is_blocking() and is_instance_valid(defense_component):
-		defense_component.end_block()
+	_cancel_all_actions()
 
 	abort_action()
+	play_action(ACTION_DEATH, 1.0)
+	if is_inside_tree():
+		get_tree().create_timer(DEATH_FREEZE_TIME).timeout.connect(_freeze_corpse_pose)
 	cmd_clear_target()
 
 	# Keep collision shape enabled so corpse never falls through the floor!
@@ -482,6 +543,11 @@ func _on_died(attacker: Node3D) -> void:
 	velocity.z = 0.0
 
 	character_died.emit(attacker)
+
+
+func _freeze_corpse_pose() -> void:
+	if is_instance_valid(animation_tree) and not is_alive():
+		animation_tree.active = false
 
 
 # --- Impulse Helpers Called by Components ---

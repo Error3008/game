@@ -45,6 +45,7 @@ var _player_hp_bar: ProgressBar = null
 var _player_hp_label: Label = null
 var _player_stamina_bar: ProgressBar = null
 var _player_stamina_label: Label = null
+var _player_flask_label: Label = null
 
 # Target Overhead UI Nodes
 var _target_panel: VBoxContainer = null
@@ -94,7 +95,7 @@ func _build_player_hud() -> void:
 	_player_panel.anchor_top = 1.0
 	_player_panel.anchor_bottom = 1.0
 
-	var total_panel_height: float = player_bar_height * 2.0 + player_bar_spacing
+	var total_panel_height: float = player_bar_height * 3.0 + player_bar_spacing * 2.0
 	_player_panel.offset_left = -player_bar_width * 0.5
 	_player_panel.offset_right = player_bar_width * 0.5
 	_player_panel.offset_top = -player_bottom_margin - total_panel_height
@@ -111,6 +112,14 @@ func _build_player_hud() -> void:
 	_player_stamina_bar = stam_pair["bar"]
 	_player_stamina_label = stam_pair["label"]
 	_player_panel.add_child(_player_stamina_bar)
+
+	# Flask charges (heal, key H)
+	_player_flask_label = Label.new()
+	_player_flask_label.name = "FlaskLabel"
+	_player_flask_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_player_flask_label.add_theme_color_override("font_outline_color", text_outline_color)
+	_player_flask_label.add_theme_constant_override("outline_size", 4)
+	_player_panel.add_child(_player_flask_label)
 
 	_player_panel.visible = show_player_hud
 
@@ -229,6 +238,9 @@ func _update_player_hud(delta: float) -> void:
 	_player_stamina_bar.max_value = max_stam
 	_player_stamina_bar.value = _displayed_player_stamina
 	_player_stamina_label.text = "STAMINA  %d / %d" % [roundi(_displayed_player_stamina), roundi(max_stam)]
+
+	if is_instance_valid(player_actor.heal_component):
+		_player_flask_label.text = "FLASK [H]  x%d" % player_actor.heal_component.charges
 
 
 func _update_target_hud(delta: float) -> void:
