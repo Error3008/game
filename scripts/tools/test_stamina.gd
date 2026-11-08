@@ -115,7 +115,7 @@ func _run_tests() -> void:
 	player.take_damage(dummy_sword_dmg, Vector3(0, 0, 1), dummy)
 
 	assert(player.current_health == health_before, "No damage taken during perfect parry")
-	assert(player.current_stamina == stam_before + player.defense_component.parry_bonus_stamina, "Stamina should be refunded +15.0")
+	assert(player.current_stamina == stam_before + player.stats.parry_bonus_stamina, "Stamina should be refunded +15.0")
 	assert(dummy.is_staggered == true, "Attacking dummy should be staggered by parry")
 	print("Player stamina after parry: ", player.current_stamina, " (refunded +15.0)")
 	print(">> TEST 5 PASSED")

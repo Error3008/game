@@ -33,12 +33,30 @@ var is_dashing: bool = false
 var dash_time_elapsed: float = 0.0
 var dash_cooldown_timer: float = 0.0
 var dash_move_direction: Vector3 = Vector3.ZERO
+# Снимок статов на момент старта дэша (чтобы смена модификаторов не ломала дэш посреди движения)
+var _active_speed: float = 0.0
+var _active_exit_speed: float = 0.0
+var _active_duration: float = 0.0
+var _active_iframe_end: float = 0.0
 
 var actor: Node3D = null
 
 
 func setup(parent_actor: Node3D) -> void:
 	actor = parent_actor
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	if sb != null:
+		sb.set_base(StatKeys.DASH_SPEED, dash_speed)
+		sb.set_base(StatKeys.DASH_DURATION, dash_duration)
+		sb.set_base(StatKeys.DASH_COOLDOWN, dash_cooldown)
+		sb.set_base(StatKeys.DASH_IFRAME_DURATION, dash_iframe_end - dash_iframe_start)
+		sb.set_base(StatKeys.DASH_STAMINA_COST, stamina_cost)
+
+
+## Итоговое значение стата актора (с модификаторами билда); fallback — если StatBlock нет.
+func _stat(key: StringName, fallback: float) -> float:
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	return sb.get_value(key) if sb != null else fallback
 
 
 func update(delta: float) -> void:
@@ -51,9 +69,9 @@ func update(delta: float) -> void:
 	dash_time_elapsed += delta
 
 	# Physical movement: smoothly decelerate toward combat walk speed
-	if dash_time_elapsed < dash_duration:
-		var progress := clampf(dash_time_elapsed / dash_duration, 0.0, 1.0)
-		var target_speed := lerpf(dash_speed, 2.4, progress)
+	if dash_time_elapsed < _active_duration:
+		var progress := clampf(dash_time_elapsed / _active_duration, 0.0, 1.0)
+		var target_speed := lerpf(_active_speed, _active_exit_speed, progress)
 		if is_instance_valid(actor) and actor.has_method("apply_dash_velocity"):
 			actor.apply_dash_velocity(dash_move_direction, target_speed, delta)
 	else:
@@ -68,7 +86,7 @@ func can_dash() -> bool:
 	if is_dashing or dash_cooldown_timer > 0.0:
 		return false
 	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
-		if not actor.stamina_component.can_afford(stamina_cost):
+		if not actor.stamina_component.can_afford(_stat(StatKeys.DASH_STAMINA_COST, stamina_cost)):
 			return false
 	return true
 
@@ -76,16 +94,24 @@ func can_dash() -> bool:
 func start_dash(chosen_dir: DashDirection) -> bool:
 	if not can_dash():
 		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
-			if not actor.stamina_component.can_afford(stamina_cost):
-				print("[%s] Cannot dash! Insufficient stamina (need %.1f, have %.1f)." % [actor.name, stamina_cost, actor.stamina_component.current_stamina])
+			var need := _stat(StatKeys.DASH_STAMINA_COST, stamina_cost)
+			if not actor.stamina_component.can_afford(need):
+				print("[%s] Cannot dash! Insufficient stamina (need %.1f, have %.1f)." % [actor.name, need, actor.stamina_component.current_stamina])
 		return false
 
 	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
-		actor.stamina_component.consume(stamina_cost)
+		actor.stamina_component.consume(_stat(StatKeys.DASH_STAMINA_COST, stamina_cost))
 
 	is_dashing = true
 	dash_time_elapsed = 0.0
-	dash_cooldown_timer = dash_cooldown
+	# Кулдаун стартует с КОНЦА дэша (см. end_dash), иначе баф кулдауна «съедается» длительностью.
+	dash_cooldown_timer = 0.0
+	_active_speed = _stat(StatKeys.DASH_SPEED, dash_speed)
+	_active_duration = _stat(StatKeys.DASH_DURATION, dash_duration)
+	# Скорость, к которой дэш затухает к концу (боевой шаг билда)
+	_active_exit_speed = _stat(StatKeys.MOVE_COMBAT_WALK, 2.4) * _stat(StatKeys.MOVE_SPEED, 1.0)
+	# i-frames: окно [start, start + длительность], но не дольше самого дэша (минус 0.02 с запаса)
+	_active_iframe_end = minf(dash_iframe_start + _stat(StatKeys.DASH_IFRAME_DURATION, dash_iframe_end - dash_iframe_start), _active_duration - 0.02)
 
 	var forward_basis := Vector3.FORWARD
 	var right_basis := Vector3.RIGHT
@@ -111,7 +137,7 @@ func start_dash(chosen_dir: DashDirection) -> bool:
 
 	# Apply initial kinetic impulse
 	if is_instance_valid(actor) and actor.has_method("set_dash_initial_velocity"):
-		actor.set_dash_initial_velocity(dash_move_direction * dash_speed)
+		actor.set_dash_initial_velocity(dash_move_direction * _active_speed)
 
 	dash_started.emit(chosen_dir)
 	return true
@@ -121,8 +147,9 @@ func end_dash() -> void:
 	if not is_dashing:
 		return
 	is_dashing = false
+	dash_cooldown_timer = _stat(StatKeys.DASH_COOLDOWN, dash_cooldown)
 	dash_finished.emit()
 
 
 func is_in_iframe() -> bool:
-	return is_dashing and dash_time_elapsed >= dash_iframe_start and dash_time_elapsed <= dash_iframe_end
+	return is_dashing and dash_time_elapsed >= dash_iframe_start and dash_time_elapsed <= _active_iframe_end

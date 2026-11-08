@@ -58,6 +58,11 @@ enum State {
 @export var ideal_combat_dist_max: float = 3.2
 @export var lose_player_dist: float = 16.0
 
+## Контакт клинка — чуть позже открытия хитбокса (окно хитбокса начинается в windup_time).
+const PARRY_IMPACT_OFFSET: float = 0.05
+## Доля окна парирования, которая приходится ДО момента удара (остаток — после).
+const PARRY_LEAD_FRACTION: float = 0.6
+
 var actor: CombatCharacter3D = null
 var current_state: State = State.IDLE
 var target: Node3D = null
@@ -268,7 +273,7 @@ func _process_combat(delta: float) -> void:
 func _pick_new_orbit_action() -> void:
 	# Drop block if stamina gets dangerously low
 	if actor.is_blocking() and not (is_dummy and dummy_always_block):
-		if actor.stamina_component and actor.stamina_component.current_stamina < 20.0:
+		if actor.stamina_component and actor.stamina_component.current_stamina < _block_drop_stamina_threshold():
 			actor.cmd_block_release()
 
 	var roll := randf()
@@ -286,6 +291,12 @@ func _pick_new_orbit_action() -> void:
 	if not is_dummy and can_block and randf() <= tactical_block_chance and not actor.is_blocking():
 		actor.cmd_block_start()
 		block_hold_timer = randf_range(block_duration_min, block_duration_max)
+
+
+## Ниже этого уровня стамины ИИ опускает блок. 20/35 от ЭФФЕКТИВНОЙ цены блока:
+## на базовых статах = 20 (как раньше), у бронированного порог падает вместе с ценой блока.
+func _block_drop_stamina_threshold() -> float:
+	return actor.stat(StatKeys.BLOCK_STAMINA_COST) * (20.0 / 35.0)
 
 
 func _process_attack_approach(delta: float) -> void:
@@ -345,7 +356,8 @@ func _check_dodge_reaction(dist: float) -> bool:
 		var wants_dodge: bool = can_dodge and (randf() <= dodge_chance)
 		var effective_cooldown := 0.0 if dodge_chance >= 0.99 else dodge_cooldown_timer
 
-		if wants_dodge and effective_cooldown <= 0.0:
+		var can_dash_now: bool = is_instance_valid(actor.dash_component) and actor.dash_component.can_dash()
+		if wants_dodge and effective_cooldown <= 0.0 and can_dash_now:
 			pending_defense_action = 1 # Dodge
 			if delay <= 0.001:
 				_execute_random_dodge()
@@ -356,6 +368,7 @@ func _check_dodge_reaction(dist: float) -> bool:
 		elif can_block and (randf() <= block_chance):
 			if randf() <= parry_chance:
 				pending_defense_action = 3 # Parry (block + deflect)
+				delay = maxf(delay, _parry_start_delay())
 			else:
 				pending_defense_action = 2 # Block (passive guard)
 			if delay <= 0.001:
@@ -366,6 +379,22 @@ func _check_dodge_reaction(dist: float) -> bool:
 			return true
 
 	return false
+
+
+## Через сколько секунд открывать окно парирования, чтобы удар цели пришёлся в его начало-середину.
+## Учитывает ЭФФЕКТИВНЫЙ замах цели (windup / attack.speed) и ЭФФЕКТИВНОЕ окно самого ИИ (броня расширяет).
+func _parry_start_delay() -> float:
+	if not is_instance_valid(target) or not ("attack_component" in target):
+		return 0.0
+	var atk: MeleeAttackComponent = target.attack_component
+	if not is_instance_valid(atk) or not is_instance_valid(atk.weapon_data):
+		return 0.0
+	# attack_time_elapsed идёт во «времени оружия» (уже умножено на attack_speed_scale)
+	var scale: float = maxf(atk.attack_speed_scale, 0.1)
+	var impact_weapon_time: float = atk.weapon_data.windup_time + PARRY_IMPACT_OFFSET
+	var remaining: float = (impact_weapon_time - atk.attack_time_elapsed) / scale
+	var window: float = actor.stat(StatKeys.PARRY_WINDOW)
+	return maxf(0.0, remaining - window * PARRY_LEAD_FRACTION + randf_range(-0.03, 0.03))
 
 
 func _execute_pending_defense() -> void:
@@ -389,7 +418,6 @@ func _execute_pending_defense() -> void:
 
 
 func _execute_random_dodge() -> void:
-	dodge_cooldown_timer = randf_range(dodge_cooldown_min, dodge_cooldown_max)
 	var roll := randf()
 	var dir := DashComponent.DashDirection.BACKWARD
 	if roll < 0.60:
@@ -399,7 +427,11 @@ func _execute_random_dodge() -> void:
 	else:
 		dir = DashComponent.DashDirection.RIGHT
 
-	actor.cmd_dash(dir)
+	# Кулдаун уклонов запускаем только если дэш реально начался (cmd_dash мог отказать: блок, stagger и т.п.).
+	if actor.cmd_dash(dir):
+		# Паузу между уклонами масштабируем так же, как кулдаун дэша билда (ловкий враг уклоняется чаще).
+		var cd_scale: float = actor.stat(StatKeys.DASH_COOLDOWN) / maxf(actor.stat_block.get_base(StatKeys.DASH_COOLDOWN), 0.001)
+		dodge_cooldown_timer = randf_range(dodge_cooldown_min, dodge_cooldown_max) * cd_scale
 
 
 # --- Detection Area Signals ---

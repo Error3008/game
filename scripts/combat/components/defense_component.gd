@@ -29,13 +29,8 @@ enum BlockState {
 @export var parry_speed_scale: float = 1.0
 @export var debug_block_visual: bool = true
 
-@export_group("Stamina & Guard Break")
-## Stamina consumed when an incoming attack is absorbed by passive block.
-@export var block_impact_stamina_cost: float = 35.0
-## Stamina bonus restored when executing a successful parry in the gold window.
-@export var parry_bonus_stamina: float = 15.0
-## Stagger duration applied when defender's stamina drops to 0 during passive block.
-@export var guard_break_stagger_duration: float = 1.5
+# Стоимость блока, бонус парирования и длительность guard break живут в CharacterStats
+# (block_impact_stamina_cost, parry_bonus_stamina, guard_break_stagger_duration) — единый источник.
 
 var block_state: BlockState = BlockState.NONE
 var parry_timer: float = 0.0
@@ -49,15 +44,19 @@ var _indicator_mat: StandardMaterial3D = null
 
 func setup(parent_actor: Node3D) -> void:
 	actor = parent_actor
-	if is_instance_valid(actor) and "stats" in actor and actor.stats != null:
-		var s: CharacterStats = actor.stats
-		if s.block_impact_stamina_cost > 0.0:
-			block_impact_stamina_cost = s.block_impact_stamina_cost
-		if s.parry_bonus_stamina >= 0.0:
-			parry_bonus_stamina = s.parry_bonus_stamina
-		if s.guard_break_stagger_duration > 0.0:
-			guard_break_stagger_duration = s.guard_break_stagger_duration
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	if sb != null:
+		sb.set_base(StatKeys.PARRY_WINDOW, parry_window_duration)
+		var s := _stats()
+		if s != null:
+			sb.set_base(StatKeys.BLOCK_STAMINA_COST, s.block_impact_stamina_cost)
 	_setup_debug_visual()
+
+
+func _stats() -> CharacterStats:
+	if is_instance_valid(actor) and "stats" in actor:
+		return actor.stats
+	return null
 
 
 func _setup_debug_visual() -> void:
@@ -136,7 +135,8 @@ func trigger_parry() -> bool:
 		return false
 
 	block_state = BlockState.ACTIVE_PARRY
-	parry_timer = parry_window_duration
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	parry_timer = sb.get_value(StatKeys.PARRY_WINDOW) if sb != null else parry_window_duration
 	_update_debug_visual()
 	parry_attempted.emit()
 
@@ -215,7 +215,7 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 
 		# Perfect parry reward: restore stamina (costs 0!)
 		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
-			actor.stamina_component.restore(parry_bonus_stamina)
+			actor.stamina_component.restore(_stats().parry_bonus_stamina if _stats() != null else 0.0)
 
 		if is_instance_valid(attacker):
 			if attacker.has_method("stagger"):
@@ -244,14 +244,16 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 		# Consume stamina on passive block impact
 		if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
 			var stam: StaminaComponent = actor.stamina_component
-			stam.consume(block_impact_stamina_cost)
+			var s := _stats()
+			var sb: StatBlock = actor.get("stat_block")
+			stam.consume(sb.get_value(StatKeys.BLOCK_STAMINA_COST) if sb != null else (s.block_impact_stamina_cost if s != null else 0.0))
 			if stam.current_stamina <= 0.0:
 				result["was_guard_broken"] = true
 				end_block()
 				guard_broken.emit(attacker)
 				stam.trigger_guard_break(attacker)
 				if actor.has_method("stagger"):
-					actor.stagger(guard_break_stagger_duration, attacker)
+					actor.stagger(s.guard_break_stagger_duration if s != null else 1.5, attacker)
 
 		if not result.get("was_guard_broken", false):
 			block_impact.emit(attacker)

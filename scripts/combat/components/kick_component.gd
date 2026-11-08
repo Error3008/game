@@ -25,7 +25,6 @@ signal kick_finished
 @export_group("Impact & Damage")
 @export var guard_break_damage: float = 10.0
 @export var guard_break_knockback: float = 4.0
-@export var guard_break_stagger_duration: float = 1.5
 @export var guard_break_stamina_drain: float = 50.0
 @export var unblocked_damage: float = 10.0
 @export var unblocked_knockback: float = 2.0
@@ -185,7 +184,9 @@ func _apply_kick_impact(target_node: Node3D) -> void:
 
 		# 4. Apply heavy guard break stagger (1.5s stun)
 		if target_node.has_method("stagger"):
-			target_node.stagger(guard_break_stagger_duration, actor)
+			# Длительность — свойство защищающегося (CharacterStats цели), как и при guard break от блока.
+			var target_stats: CharacterStats = target_node.stats if "stats" in target_node else null
+			target_node.stagger(target_stats.guard_break_stagger_duration if target_stats != null else 1.5, actor)
 
 		kick_hit_landed.emit(target_node, true)
 	else:

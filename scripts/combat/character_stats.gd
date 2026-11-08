@@ -35,6 +35,13 @@ extends Resource
 @export var parry_attempt_stamina_cost: float = 0.0
 @export var guard_break_stagger_duration: float = 1.5
 
+@export_group("Build")
+## Уровни билда 0–10 (0 = нейтрально). В модификаторы превращаются через AttributeRules.
+@export_range(0, 10) var armor: int = 0
+@export_range(0, 10) var agility: int = 0
+## Если не задано — берутся значения по умолчанию из AttributeRules.
+@export var attribute_rules: AttributeRules = null
+
 @export_group("Healing")
 @export var heal_charges: int = 3
 @export var heal_amount: float = 40.0

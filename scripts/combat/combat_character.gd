@@ -23,6 +23,7 @@ const DEATH_FREEZE_TIME: float = 1.75
 @onready var pawn: Node3D = get_node_or_null("pawn")
 @onready var animation_tree: AnimationTree = get_node_or_null("pawn/AnimationTree")
 
+var stat_block: StatBlock = null
 var health_component: HealthComponent = null
 var defense_component: DefenseComponent = null
 var attack_component: MeleeAttackComponent = null
@@ -101,6 +102,12 @@ func _ready() -> void:
 
 
 func _discover_and_setup_components() -> void:
+	# StatBlock создаётся первым: компоненты регистрируют в нём базы в своём setup().
+	stat_block = StatBlock.new()
+	stat_block.name = "StatBlock"
+	add_child(stat_block)
+	_register_actor_stat_bases()
+
 	health_component = get_node_or_null("HealthComponent") as HealthComponent
 	if not is_instance_valid(health_component):
 		health_component = HealthComponent.new()
@@ -145,6 +152,44 @@ func _discover_and_setup_components() -> void:
 		add_child(heal_component)
 	heal_component.setup(self)
 	heal_component.init_from_stats(stats)
+
+	# Базы уже зарегистрированы компонентами — теперь накладываем билд.
+	apply_build()
+
+
+## Пересчитывает модификаторы билда (armor/agility) из stats. Безопасно вызывать повторно.
+func apply_build() -> void:
+	var rules: AttributeRules = stats.attribute_rules if stats.attribute_rules != null else AttributeRules.new()
+	rules.apply(stat_block, stats.armor, stats.agility)
+
+
+## Итоговое значение стата (база + модификаторы билда).
+func stat(key: StringName) -> float:
+	return stat_block.get_value(key)
+
+
+## Скорость движения по ключу с общим множителем move.speed.
+##
+## !!! ВНИМАНИЕ: НЕДОЧЁТ ПО ПРОИЗВОДИТЕЛЬНОСТИ (отложено сознательно, но НЕ забыть) !!!
+## Каждый вызов = 2 × StatBlock.get_value(), а оно каждый раз обходит ВЕСЬ список модификаторов.
+## Вызывается из cmd_move / cmd_combat_move / _update_animations (до ~3 раз за кадр на актора).
+## Для дуэлей 1×1 это незаметно, но с десятками ИИ в мире (Этап 5) станет узким местом.
+## Решение: кэшировать итоговые значения в StatBlock и пересчитывать только по сигналу
+## stats_changed (см. подробный комментарий у StatBlock.get_value).
+func move_speed(key: StringName) -> float:
+	return stat_block.get_value(key) * stat_block.get_value(StatKeys.MOVE_SPEED)
+
+
+## Базы статов, которыми владеет сам актор (движение, входящий урон, здоровье).
+## Базы компонентов (dash.*, defense.*, stamina.*, attack.speed) регистрируют сами компоненты.
+func _register_actor_stat_bases() -> void:
+	stat_block.set_base(StatKeys.MOVE_SPEED, 1.0)
+	stat_block.set_base(StatKeys.MOVE_RUN, stats.run_speed)
+	stat_block.set_base(StatKeys.MOVE_WALK, stats.walk_speed)
+	stat_block.set_base(StatKeys.MOVE_COMBAT_WALK, stats.combat_walk_speed)
+	stat_block.set_base(StatKeys.MOVE_COMBAT_STRAFE, stats.combat_strafe_speed)
+	stat_block.set_base(StatKeys.DAMAGE_TAKEN, 1.0)
+	stat_block.set_base(StatKeys.HEALTH_MAX, stats.max_health)
 
 
 func _physics_process(delta: float) -> void:
@@ -264,7 +309,7 @@ func cmd_move(world_dir: Vector3, is_running: bool) -> void:
 	target_combat_movement = Vector2.ZERO
 
 	if world_dir != Vector3.ZERO:
-		var speed := stats.run_speed if is_running else stats.walk_speed
+		var speed := move_speed(StatKeys.MOVE_RUN if is_running else StatKeys.MOVE_WALK)
 		desired_move_velocity.x = lerp(velocity.x, world_dir.x * speed, stats.accel * get_physics_process_delta_time())
 		desired_move_velocity.z = lerp(velocity.z, world_dir.z * speed, stats.accel * get_physics_process_delta_time())
 		is_moving_requested = true
@@ -288,7 +333,7 @@ func cmd_combat_move(lateral: float, forward: float, speed_override: float = -1.
 		var right_b := get_right_basis()
 
 		var move_dir := (forward_b * forward + right_b * lateral).normalized()
-		var speed := speed_override if speed_override > 0.0 else (stats.combat_strafe_speed if absf(lateral) > 0.1 else stats.combat_walk_speed)
+		var speed := speed_override * stat(StatKeys.MOVE_SPEED) if speed_override > 0.0 else move_speed(StatKeys.MOVE_COMBAT_STRAFE if absf(lateral) > 0.1 else StatKeys.MOVE_COMBAT_WALK)
 
 		desired_move_velocity.x = lerp(velocity.x, move_dir.x * speed, stats.combat_accel * get_physics_process_delta_time())
 		desired_move_velocity.z = lerp(velocity.z, move_dir.z * speed, stats.combat_accel * get_physics_process_delta_time())
@@ -448,6 +493,9 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 
 		if eval["was_penalty"]:
 			print("[%s] STRUCK DURING PARRY PENALTY! Defenses broken." % name)
+
+	# 2б. Множитель входящего урона от билда (броня/ловкость): после блока, до здоровья
+	final_damage *= stat(StatKeys.DAMAGE_TAKEN)
 
 	# 3. Apply damage to HealthComponent
 	if is_instance_valid(health_component):
@@ -663,10 +711,12 @@ func _update_animations(delta: float) -> void:
 	# 4. Locomotion BlendSpace1D
 	var blend_val := 0.0
 	if horizontal_speed > 0.05:
-		if horizontal_speed <= stats.walk_speed:
-			blend_val = remap(horizontal_speed, 0.0, stats.walk_speed, 0.0, 0.5)
+		var walk_spd := move_speed(StatKeys.MOVE_WALK)
+		var run_spd := move_speed(StatKeys.MOVE_RUN)
+		if horizontal_speed <= walk_spd:
+			blend_val = remap(horizontal_speed, 0.0, walk_spd, 0.0, 0.5)
 		else:
-			blend_val = clampf(remap(horizontal_speed, stats.walk_speed, stats.run_speed, 0.5, 1.0), 0.5, 1.0)
+			blend_val = clampf(remap(horizontal_speed, walk_spd, run_spd, 0.5, 1.0), 0.5, 1.0)
 
 	if "parameters/Locomotion/blend_position" in animation_tree:
 		var cur_loco: float = animation_tree.get("parameters/Locomotion/blend_position")
@@ -676,5 +726,7 @@ func _update_animations(delta: float) -> void:
 	if "parameters/SpeedScale/scale" in animation_tree:
 		var speed_scale := 1.0
 		if horizontal_speed > 0.05:
-			speed_scale = maxf(0.8, (horizontal_speed / 2.5) * stats.anim_speed_multiplier)
+			# Делим на БАЗОВУЮ скорость ходьбы (клип рассчитан на неё): иначе штраф брони
+			# сокращает и делитель, и ноги анимируются в обычном темпе при замедленном движении.
+			speed_scale = maxf(0.8, (horizontal_speed / stat_block.get_base(StatKeys.MOVE_WALK)) * stats.anim_speed_multiplier)
 		animation_tree.set("parameters/SpeedScale/scale", speed_scale)

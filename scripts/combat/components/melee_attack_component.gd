@@ -47,6 +47,9 @@ func _ready() -> void:
 func setup(parent_actor: Node3D, collision_mask: int = 4) -> void:
 	actor = parent_actor
 	target_collision_mask = collision_mask
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	if sb != null:
+		sb.set_base(StatKeys.ATTACK_SPEED, 1.0)
 	if heavy_weapon_data == null:
 		heavy_weapon_data = weapon_data
 	_setup_weapon_hitbox()
@@ -78,7 +81,9 @@ func start_attack(light: bool = false) -> bool:
 
 	var cost := weapon_data.stamina_cost if (is_instance_valid(weapon_data) and weapon_data.stamina_cost > 0.0) else stamina_cost
 	is_exhausted_attack = false
-	attack_speed_scale = 1.0
+	var sb: StatBlock = actor.get("stat_block") if is_instance_valid(actor) else null
+	var build_speed: float = sb.get_value(StatKeys.ATTACK_SPEED) if sb != null else 1.0
+	attack_speed_scale = build_speed
 
 	if is_instance_valid(actor) and "stamina_component" in actor and is_instance_valid(actor.stamina_component):
 		var stam: StaminaComponent = actor.stamina_component
@@ -89,7 +94,7 @@ func start_attack(light: bool = false) -> bool:
 			if insufficient_stamina_policy == InsufficientStaminaPolicy.SLOW_ATTACK and stam.current_stamina >= min_stamina_to_attack:
 				stam.consume(stam.current_stamina)
 				is_exhausted_attack = true
-				attack_speed_scale = exhausted_attack_speed
+				attack_speed_scale = build_speed * exhausted_attack_speed
 				print("[%s] EXHAUSTED ATTACK! Low stamina, swinging weapon at %.1fx speed!" % [actor.name, attack_speed_scale])
 			else:
 				print("[%s] Cannot attack! Insufficient stamina (need %.1f, have %.1f)." % [actor.name, cost, stam.current_stamina])

@@ -24,14 +24,6 @@ signal guard_broken(attacker: Node3D)
 ## If true, regeneration delay timer pauses while the character is in a staggered state.
 @export var pause_regen_during_stagger: bool = false
 
-@export_group("Guard Break")
-## Stagger duration applied to the defender when stamina drops to 0 while blocking.
-@export var guard_break_stagger_duration: float = 1.5
-
-@export_group("Parry Reward")
-## Stamina refunded/restored upon landing a perfect parry in the gold window.
-@export var parry_bonus_stamina: float = 15.0
-
 @export_group("Configuration")
 ## If true, will copy values from actor's CharacterStats if available.
 @export var use_stats_resource: bool = true
@@ -61,10 +53,9 @@ func init_from_stats(stats: CharacterStats) -> void:
 		regen_delay = stats.stamina_regen_delay
 	if stats.block_regen_multiplier >= 0.0:
 		block_regen_multiplier = stats.block_regen_multiplier
-	if stats.guard_break_stagger_duration > 0.0:
-		guard_break_stagger_duration = stats.guard_break_stagger_duration
-	if stats.parry_bonus_stamina >= 0.0:
-		parry_bonus_stamina = stats.parry_bonus_stamina
+	if is_instance_valid(actor) and actor.stat_block != null:
+		actor.stat_block.set_base(StatKeys.STAMINA_MAX, max_stamina)
+		actor.stat_block.set_base(StatKeys.STAMINA_REGEN, regen_rate)
 	stamina_changed.emit(current_stamina, max_stamina)
 
 
@@ -156,7 +147,7 @@ func trigger_guard_break(attacker: Node3D = null) -> void:
 
 	if debug_logging and is_instance_valid(actor):
 		var att_name: String = String(attacker.name) if is_instance_valid(attacker) else "Attacker"
-		print("[%s] GUARD BROKEN by %s! Stamina reduced to 0, defenses collapsed for %.2fs." % [actor.name, att_name, guard_break_stagger_duration])
+		print("[%s] GUARD BROKEN by %s! Stamina reduced to 0, defenses collapsed for %.2fs." % [actor.name, att_name, actor.stats.guard_break_stagger_duration])
 
 
 func is_exhausted() -> bool:
