@@ -8,6 +8,7 @@ signal stats_changed
 
 var _bases: Dictionary = {}  # StringName -> float
 var _entries: Array[Dictionary] = []  # {mod: StatModifier, source: StringName}
+var _cache: Dictionary = {}  # StringName -> float, итоговые значения (лениво, сбрасывается целиком)
 
 
 func set_base(key: StringName, value: float) -> void:
@@ -15,7 +16,7 @@ func set_base(key: StringName, value: float) -> void:
 		push_error("StatBlock.set_base: unknown stat key '%s'" % key)
 		return
 	_bases[key] = value
-	stats_changed.emit()
+	_invalidate()
 
 
 func has_base(key: StringName) -> bool:
@@ -42,7 +43,7 @@ func add_modifier(mod: StatModifier, source: StringName) -> void:
 		push_error("StatBlock.add_modifier: unknown stat key '%s' (source '%s')" % [mod.stat_key, source])
 		return
 	_entries.append({"mod": mod, "source": source})
-	stats_changed.emit()
+	_invalidate()
 
 
 ## Снимает все модификаторы источника (для повторного пересчёта без дублей).
@@ -53,21 +54,16 @@ func remove_source(source: StringName) -> void:
 			kept.append(e)
 	if kept.size() != _entries.size():
 		_entries = kept
-		stats_changed.emit()
+		_invalidate()
 
 
-## !!! ВНИМАНИЕ: НЕДОЧЁТ ПО ПРОИЗВОДИТЕЛЬНОСТИ (отложено сознательно, но НЕ забыть) !!!
-## Значение пересчитывается С НУЛЯ при КАЖДОМ вызове: линейный проход по всем модификаторам
-## актора + проверки ключа. Горячие места вызывают это каждый кадр на каждого актора
-## (move_speed() в combat_character.gd, _update_animations, dash/defense/attack).
-## Сейчас (1×1) цена ничтожна. При десятках/сотнях ИИ в мире это даст заметную нагрузку
-## на CPU и мусор в кадре.
-## Что сделать: держать кэш Dictionary key -> итог, сбрасывать/пересчитывать его только когда
-## срабатывает stats_changed (set_base / add_modifier / remove_source), а get_value отдаёт
-## готовое значение за O(1). Горячий путь тогда не обходит модификаторы вообще.
-## Дополнительно: пересчёт в set_base эмитит stats_changed на каждый вызов при setup() —
-## при кэше сбрасывать флаг «грязный», а не пересчитывать сразу.
+## Итоговое значение. Кэшируется лениво: первый вызов после любого изменения считает по
+## формуле, следующие читают из _cache за O(1). Любое изменение баз/модификаторов сбрасывает
+## весь кэш (см. _invalidate), поэтому setup() с десятками set_base ничего не пересчитывает.
 func get_value(key: StringName) -> float:
+	var cached: Variant = _cache.get(key)
+	if cached != null:
+		return cached
 	if not StatKeys.is_known(key):
 		push_error("StatBlock.get_value: unknown stat key '%s'" % key)
 		return 0.0
@@ -92,4 +88,11 @@ func get_value(key: StringName) -> float:
 
 	var result: float = (float(_bases[key]) + flat) * maxf(0.0, 1.0 + percent) * mult
 	var bounds: Vector2 = StatKeys.BOUNDS[key]
-	return clampf(result, bounds.x, bounds.y)
+	var final_value: float = clampf(result, bounds.x, bounds.y)
+	_cache[key] = final_value
+	return final_value
+
+
+func _invalidate() -> void:
+	_cache.clear()
+	stats_changed.emit()

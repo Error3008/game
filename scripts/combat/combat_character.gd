@@ -173,13 +173,7 @@ func stat(key: StringName) -> float:
 
 
 ## Скорость движения по ключу с общим множителем move.speed.
-##
-## !!! ВНИМАНИЕ: НЕДОЧЁТ ПО ПРОИЗВОДИТЕЛЬНОСТИ (отложено сознательно, но НЕ забыть) !!!
-## Каждый вызов = 2 × StatBlock.get_value(), а оно каждый раз обходит ВЕСЬ список модификаторов.
-## Вызывается из cmd_move / cmd_combat_move / _update_animations (до ~3 раз за кадр на актора).
-## Для дуэлей 1×1 это незаметно, но с десятками ИИ в мире (Этап 5) станет узким местом.
-## Решение: кэшировать итоговые значения в StatBlock и пересчитывать только по сигналу
-## stats_changed (см. подробный комментарий у StatBlock.get_value).
+## StatBlock.get_value кэширует итог, так что вызов дешёвый (2 чтения из словаря).
 func move_speed(key: StringName) -> float:
 	return stat_block.get_value(key) * stat_block.get_value(StatKeys.MOVE_SPEED)
 
