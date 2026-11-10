@@ -50,5 +50,9 @@ func _ready() -> void:
 		var hud: CombatHUD = CombatHUD.new()
 		hud.name = "CombatHUD"
 		add_child(hud)
+	if not has_node("GameOverScreen"):
+		var game_over: GameOverScreen = GameOverScreen.new()
+		game_over.name = "GameOverScreen"
+		add_child(game_over)
 
 	super._ready()

@@ -135,6 +135,25 @@ var _kick_chance_on_blocking_player: float = 0.70
 		if is_instance_valid(ai_controller):
 			ai_controller.kick_chance_on_blocking_player = val
 
+@export_group("Corpse")
+## Сколько труп лежит до начала растворения. 0 и меньше — остаётся навсегда.
+@export_range(0.0, 600.0, 0.5, "suffix:с") var corpse_lifetime: float = 5.0
+## Длительность растворения; в конце узел удаляется.
+@export_range(0.1, 30.0, 0.1, "suffix:с") var dissolve_duration: float = 2.0
+@export var dissolve_edge_color: Color = Color(1.0, 0.55, 0.15, 1.0)
+@export_range(0.0, 20.0, 0.1) var dissolve_edge_energy: float = 4.0
+@export_range(0.5, 20.0, 0.1) var dissolve_noise_scale: float = 6.0
+## 0 = чистый шум, 1 = ровный фронт снизу вверх.
+@export_range(0.0, 1.0, 0.05) var dissolve_height_bias: float = 0.35
+
+const DISSOLVE_SHADER: Shader = preload("res://shaders/dissolve.gdshader")
+## Запасной диапазон высот (стоящий рыцарь), если у трупа не нашёлся скелет.
+const CORPSE_HEIGHT_RANGE: float = 1.9
+## Запас на толщину тела: кости лежат по оси тела, а меш толще.
+const CORPSE_BONE_MARGIN: float = 0.15
+
+var _dissolve_materials: Array[ShaderMaterial] = []
+
 # Duck-typing access to player target
 var player: Node3D:
 	get:
@@ -189,6 +208,7 @@ func _ready() -> void:
 		add_child(ctrl)
 
 	super._ready()
+	character_died.connect(_on_enemy_died)
 
 	ai_controller = get_node_or_null("EnemyAIController") as EnemyAIController
 	if is_instance_valid(ai_controller):
@@ -208,3 +228,80 @@ func _ready() -> void:
 		ai_controller.tactical_block_chance = _tactical_block_chance
 		ai_controller.can_kick = _can_kick
 		ai_controller.kick_chance_on_blocking_player = _kick_chance_on_blocking_player
+
+
+# --- Corpse dissolve ---
+
+func _on_enemy_died(_attacker: Node3D) -> void:
+	if corpse_lifetime <= 0.0:
+		return
+	# Tween привязан к узлу: если врага удалят раньше (рестарт раунда), он умрёт вместе с ним.
+	var tween: Tween = create_tween()
+	tween.tween_interval(corpse_lifetime)
+	tween.tween_callback(_begin_dissolve)
+	tween.tween_method(_set_dissolve_progress, 0.0, 1.0, dissolve_duration)
+	tween.tween_callback(queue_free)
+
+
+func _begin_dissolve() -> void:
+	_dissolve_materials.clear()
+	if not is_instance_valid(pawn):
+		return
+	var height_span: Vector2 = _corpse_height_span()
+	for node: Node in pawn.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance: MeshInstance3D = node as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		for surface: int in mesh_instance.mesh.get_surface_count():
+			var source: Material = mesh_instance.get_active_material(surface)
+			var dissolve: ShaderMaterial = _make_dissolve_material(source, height_span)
+			# Override на экземпляре: общие ресурсы материалов (у игрока и др. врагов) не меняются.
+			mesh_instance.set_surface_override_material(surface, dissolve)
+			_dissolve_materials.append(dissolve)
+
+
+## Мировая высота низа и размах трупа (x = низ, y = размах) по костям скелета в позе смерти.
+## Так градиент «снизу вверх» работает и для лежащего тела, а не только для стоящего.
+func _corpse_height_span() -> Vector2:
+	var fallback := Vector2(global_position.y, CORPSE_HEIGHT_RANGE)
+	if not is_instance_valid(pawn):
+		return fallback
+	var skeleton: Skeleton3D = null
+	for node: Node in pawn.find_children("*", "Skeleton3D", true, false):
+		skeleton = node as Skeleton3D
+		break
+	if skeleton == null or skeleton.get_bone_count() == 0:
+		return fallback
+	var low: float = INF
+	var high: float = -INF
+	for bone: int in skeleton.get_bone_count():
+		var y: float = (skeleton.global_transform * skeleton.get_bone_global_pose(bone).origin).y
+		low = minf(low, y)
+		high = maxf(high, y)
+	low -= CORPSE_BONE_MARGIN
+	high += CORPSE_BONE_MARGIN
+	return Vector2(low, maxf(high - low, 0.3))
+
+
+func _make_dissolve_material(source: Material, height_span: Vector2) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = DISSOLVE_SHADER
+	var std := source as BaseMaterial3D
+	if std != null:
+		mat.set_shader_parameter("albedo_texture", std.albedo_texture)
+		mat.set_shader_parameter("albedo_color", std.albedo_color)
+		mat.set_shader_parameter("roughness", std.roughness)
+		mat.set_shader_parameter("metallic", std.metallic)
+	mat.set_shader_parameter("origin_y", height_span.x)
+	mat.set_shader_parameter("height_range", height_span.y)
+	mat.set_shader_parameter("edge_color", dissolve_edge_color)
+	mat.set_shader_parameter("edge_energy", dissolve_edge_energy)
+	mat.set_shader_parameter("noise_scale", dissolve_noise_scale)
+	mat.set_shader_parameter("height_bias", dissolve_height_bias)
+	mat.set_shader_parameter("progress", 0.0)
+	return mat
+
+
+func _set_dissolve_progress(value: float) -> void:
+	for mat: ShaderMaterial in _dissolve_materials:
+		mat.set_shader_parameter("progress", value)
