@@ -93,6 +93,45 @@ enum DebugMapMode {
 # Нажми «+» в инспекторе чтобы добавить новый SpawnableItem.
 @export var spawnable_items : Array[SpawnableItem]
 
+@export_group("Enemies (временный простой спавн)")
+## Рыцари, случайно разбросанные по всем сгенерированным чанкам (кроме зоны вокруг игрока). Заглушка до этапа 5.
+@export var spawn_enemies : bool = true
+@export var enemy_scene : PackedScene = preload("res://scenes/enemy.tscn")
+@export var enemy_count : int = 10
+## Радиус вокруг игрока, в котором враги не спавнятся (защита от ранних нападений).
+@export var enemy_min_distance : float = 15.0
+## Ставить ли игрока на землю после генерации (до этого он заморожен, чтобы не падать в пустоту).
+@export var place_player_on_ground : bool = true
+## Максимальный угол склона (градусы) для точки спавна игрока/врага.
+@export var spawn_max_slope : float = 30.0
+## Минимальная высота над водой (в метрах), ниже — не спавним.
+@export var spawn_min_height : float = 1.0
+
+## Высота цилиндра, если у объекта нет меша (м). Обычно высота берётся по AABB меша * масштаб.
+## Метка на StaticBody3D стволов: лучи спавна пропускают такие тела (см. _ground_point).
+const TRUNK_BODY_META : StringName = &"is_trunk_body"
+const TRUNK_COLLISION_HEIGHT_FALLBACK : float = 6.0
+## Насколько цилиндр ствола уходит под землю (м), чтобы на склоне не было щели у основания.
+const TRUNK_COLLISION_SINK : float = 1.0
+
+## Радиус и высота центра сферы проверки "не в стволе" при спавне игрока/врага (м).
+const SPAWN_CLEARANCE_RADIUS : float = 0.5
+const SPAWN_CLEARANCE_HEIGHT : float = 1.2
+## Поиск места для игрока спиралью вокруг стартовой точки: радиус и шаг (м).
+const PLAYER_SPAWN_SEARCH_RADIUS : float = 80.0
+const PLAYER_SPAWN_SEARCH_STEP : float = 4.0
+
+const ENEMY_BUILDS : Array[String] = [
+	"res://resources/stats/enemy_armored.tres",
+	"res://resources/stats/enemy_agile.tres",
+	"res://resources/stats/enemy_balanced.tres",
+]
+const ENEMY_PERSONALITIES : Array[String] = [
+	"res://resources/ai/personality_duelist.tres",
+	"res://resources/ai/personality_bully.tres",
+	"res://resources/ai/personality_turtle.tres",
+]
+
 @export_group("Grass Generation (GPU Carpet)")
 ## Включить процедурную генерацию травяного ковра на GPU
 @export var enable_grass : bool = true
@@ -139,11 +178,25 @@ var _chunk_spawn_queue : Array[Dictionary] = []
 
 # task_id генерации, которую нужно дождаться перед очисткой (неблокирующий polling).
 # -1 = нет ожидающей задачи.
+## Печатать статистику коллизии стволов (число стволов на чанк, время блока в spawn_chunk, размер кэша шейпов).
+@export var debug_trunk_stats : bool = false
+var _dbg_chunks : int = 0
+var _dbg_trunks_total : int = 0
+var _dbg_trunks_max : int = 0
+var _dbg_usec_total : int = 0
+var _dbg_usec_max : int = 0
+# Общие CylinderShape3D для стволов: ключ = Vector2i(радиус в 0.1 м, высота в 0.5 м). Только основной поток.
+var _trunk_shape_cache : Dictionary = {}
+var _enemies_pending : bool = false
+var _spawned_enemies : Array[Node] = []
+var _held_player : Node = null  # заморожен до готовности земли
+
 var _pending_clear_task_id : int = -1
 var _waiting_to_clear : bool = false
 
 func _ready() -> void:
 	if not Engine.is_editor_hint():
+		_hold_player()
 		generate_chunks()
 
 func _process(_delta: float) -> void:
@@ -175,6 +228,158 @@ func _process(_delta: float) -> void:
 		var entry : Dictionary = _chunk_spawn_queue.pop_front()
 		spawn_chunk(entry["pos"], entry["mesh"], entry["objects"], entry["terrain"], entry.get("col_shape", null))
 		spawns_done += 1
+
+	# --- Простой спавн врагов: когда все чанки появились (коллайдеры уже есть) ---
+	if _enemies_pending and task_id != -1 and _chunk_spawn_queue.is_empty() \
+			and WorkerThreadPool.is_group_task_completed(task_id):
+		_enemies_pending = false
+		# Ждём физический шаг: только что добавленные коллайдеры чанков могут стать видны лучам не сразу.
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+		_place_player_on_ground()
+		_spawn_enemies_around_player()
+
+## Замораживает игрока до готовности земли: иначе он падает с y≈45 в пустоту, пока нет коллайдера.
+func _hold_player() -> void:
+	if not place_player_on_ground:
+		return
+	_held_player = get_tree().get_first_node_in_group("player")
+	if _held_player != null:
+		_held_player.process_mode = Node.PROCESS_MODE_DISABLED
+
+func _release_player() -> void:
+	if is_instance_valid(_held_player):
+		_held_player.process_mode = Node.PROCESS_MODE_INHERIT
+	_held_player = null
+
+## Сфера-проверка "не в стволе" (см. _ground_point).
+func _make_clearance_query() -> PhysicsShapeQueryParameters3D:
+	var clearance := SphereShape3D.new()
+	clearance.radius = SPAWN_CLEARANCE_RADIUS
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = clearance
+	query.collision_mask = 1
+	return query
+
+## Подходящая точка на земле для спавна в мировых (x, z) или null.
+## Луч вниз по коллизии рельефа (слой 1), затем фильтры: вода/пляж, крутой склон,
+## и сфера над землёй — на слое 1 с ней может пересечься только ствол (или будущее препятствие).
+func _ground_point(space: PhysicsDirectSpaceState3D, x: float, z: float,
+		clearance_query: PhysicsShapeQueryParameters3D) -> Variant:
+	var query := PhysicsRayQueryParameters3D.create(Vector3(x, 400.0, z), Vector3(x, -100.0, z), 1)
+	var hit := space.intersect_ray(query)
+	# Луч сверху может попасть в верхнюю крышку цилиндра ствола (у деревьев конечная высота) —
+	# тогда пропускаем это тело и ищем дальше вниз настоящую землю.
+	var excluded : Array[RID] = []
+	while not hit.is_empty() and (hit["collider"] as Object).has_meta(TRUNK_BODY_META) and excluded.size() < 8:
+		excluded.append(hit["rid"])
+		query.exclude = excluded
+		hit = space.intersect_ray(query)
+	if hit.is_empty():
+		return null # за пределами сгенерированной области
+	var pos : Vector3 = hit["position"]
+	if pos.y < spawn_min_height or (hit["normal"] as Vector3).y < cos(deg_to_rad(spawn_max_slope)):
+		return null # вода/пляж или крутой склон
+	clearance_query.transform = Transform3D(Basis.IDENTITY, pos + Vector3.UP * SPAWN_CLEARANCE_HEIGHT)
+	if not space.intersect_shape(clearance_query, 1).is_empty():
+		return null # внутри ствола или вплотную к нему
+	return pos
+
+## Ставит игрока на ближайшую подходящую точку к его стартовым (x, z) спиралью наружу и размораживает.
+## Если подходящей точки нет — размораживает на месте (с предупреждением), чтобы игра не зависла.
+func _place_player_on_ground() -> void:
+	var player := _held_player as Node3D
+	if Engine.is_editor_hint() or player == null or not is_instance_valid(player):
+		_release_player()
+		return
+	var space := get_world_3d().direct_space_state
+	var clearance_query := _make_clearance_query()
+	var origin := player.global_position
+	var found : Variant = null
+	var radius := 0.0
+	while found == null and radius <= PLAYER_SPAWN_SEARCH_RADIUS:
+		var steps := 1 if radius == 0.0 else 12
+		for i in steps:
+			var angle := TAU * float(i) / float(steps)
+			found = _ground_point(space, origin.x + cos(angle) * radius, origin.z + sin(angle) * radius, clearance_query)
+			if found != null:
+				break
+		radius += PLAYER_SPAWN_SEARCH_STEP
+	if found == null:
+		push_warning("world_generation: не нашли землю для игрока в радиусе %.0f м, оставляем на месте." % PLAYER_SPAWN_SEARCH_RADIUS)
+	else:
+		player.global_position = (found as Vector3) + Vector3.UP * 0.2
+		if player is CharacterBody3D:
+			(player as CharacterBody3D).velocity = Vector3.ZERO
+	_release_player()
+
+## Временная заглушка: случайные точки по всем сгенерированным чанкам (кроме зоны вокруг игрока).
+func _spawn_enemies_around_player() -> void:
+	if Engine.is_editor_hint() or not spawn_enemies or enemy_scene == null:
+		return
+	var player := get_tree().get_first_node_in_group("player") as Node3D
+	if player == null:
+		return
+	_free_spawned_enemies()
+	
+	var space := get_world_3d().direct_space_state
+	var center := player.global_position
+	var clearance_query := _make_clearance_query()
+	
+	# Границы всех сгенерированных чанков в локальных координатах этого узла.
+	var chunk_world_size := chunk_size * cell_size
+	var min_c := Vector2(INF, INF)
+	var max_c := Vector2(-INF, -INF)
+	for c: Vector2 in current_coords:
+		min_c = min_c.min(c)
+		max_c = max_c.max(c)
+	var area_min := min_c * chunk_world_size
+	var area_max := (max_c + Vector2.ONE) * chunk_world_size
+	
+	var spawned := 0
+	for attempt in enemy_count * 30:
+		if spawned >= enemy_count:
+			break
+		var local_xz := Vector2(randf_range(area_min.x, area_max.x), randf_range(area_min.y, area_max.y))
+		var world_xz := to_global(Vector3(local_xz.x, 0.0, local_xz.y))
+		if Vector2(world_xz.x - center.x, world_xz.z - center.z).length() < enemy_min_distance:
+			continue # слишком близко к игроку
+		var pos : Variant = _ground_point(space, world_xz.x, world_xz.z, clearance_query)
+		if pos == null:
+			continue
+		
+		var enemy := enemy_scene.instantiate() as Node3D
+		enemy.set("stats", load(ENEMY_BUILDS.pick_random()))
+		enemy.set("personality", load(ENEMY_PERSONALITIES.pick_random()))
+		add_child(enemy)
+		enemy.global_position = (pos as Vector3) + Vector3.UP * 0.2
+		# Тело НЕ вращаем: cmd_face_point считает угол как мировой для $pawn.
+		var pawn := enemy.get_node_or_null("pawn") as Node3D
+		if pawn != null:
+			pawn.rotation.y = randf() * TAU
+		_spawned_enemies.append(enemy)
+		spawned += 1
+	if spawned < enemy_count:
+		push_warning("world_generation: заспавнено %d из %d врагов (мало подходящих точек)." % [spawned, enemy_count])
+
+## Общий цилиндр для ствола: размеры округляются (радиус до 0.1 м, высота до 0.5 м), чтобы вместо
+## сотен одинаковых ресурсов было несколько штук. Вызывать только из основного потока.
+func _get_trunk_shape(radius: float, height: float) -> CylinderShape3D:
+	var key := Vector2i(maxi(1, roundi(radius * 10.0)), maxi(1, roundi(height * 2.0)))
+	var shape := _trunk_shape_cache.get(key) as CylinderShape3D
+	if shape == null:
+		shape = CylinderShape3D.new()
+		shape.radius = key.x * 0.1
+		shape.height = key.y * 0.5
+		_trunk_shape_cache[key] = shape
+	return shape
+
+func _free_spawned_enemies() -> void:
+	for e in _spawned_enemies:
+		if is_instance_valid(e):
+			e.queue_free()
+	_spawned_enemies.clear()
 
 func _upload_grass_chunk(entry: Dictionary) -> void:
 	var chunk_node : MeshInstance3D = entry["chunk_node"]
@@ -595,6 +800,7 @@ func clear_generated_chunks():
 		_do_clear_chunks()
 
 func _do_clear_chunks() -> void:
+	_free_spawned_enemies()
 	# Фактическое удаление чанков — вызывается только когда потоки точно завершены
 	var removed := 0
 	for child in get_children():
@@ -683,6 +889,7 @@ func _do_start_generation() -> void:
 	
 	cancel_generation = false
 	task_id = WorkerThreadPool.add_group_task(generate_single_chunk, current_coords.size())
+	_enemies_pending = true
 
 ## heights_cache — финальные высоты (h*scale + micro), raw_h_cache — «сырые» (до scale, для water_level).
 ## Оба кэша имеют размер grid_size*grid_size, где grid_size = chunk_size + 1.
@@ -814,6 +1021,13 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 		var max_cz := ceili((chunk_world_max_z + max_reach) / type_cell_size)
 		
 		var transforms: Array[Transform3D] = []
+		# Стволы для коллизии: Vector4(локальный x, y ЦЕНТРА цилиндра, локальный z, радиус * масштаб)
+		# и параллельный массив высот цилиндров (высота меша * масштаб + заглубление под землю).
+		var trunks: Array[Vector4] = []
+		var trunk_heights := PackedFloat32Array()
+		var mesh_top := item.mesh.get_aabb().end.y if item.mesh != null else TRUNK_COLLISION_HEIGHT_FALLBACK
+		mesh_top = maxf(mesh_top, 0.5)
+		var base_collision_radius := item.trunk_collision_radius if item.trunk_collision_radius > 0.0 else type_trunk
 		
 		for cx in range(min_cx, max_cx + 1):
 			for cz in range(min_cz, max_cz + 1):
@@ -914,6 +1128,11 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 					world_y,
 					world_z - chunk_world_min_z
 				)
+				if item.has_trunk_collision:
+					var col_height := mesh_top * scale_factor + TRUNK_COLLISION_SINK
+					trunks.append(Vector4(local_pos.x, local_pos.y + (col_height * 0.5 - TRUNK_COLLISION_SINK),
+							local_pos.z, base_collision_radius * scale_factor))
+					trunk_heights.append(col_height)
 				if item.mesh == null:
 					var trunk_height := type_spacing * 1.2
 					local_pos.y += (trunk_height * 0.5) * scale_factor
@@ -957,7 +1176,9 @@ func generate_grid_objects(c : Vector2) -> Dictionary:
 			
 			result.append({
 				"item": item,
-				"multimesh": mm
+				"multimesh": mm,
+				"trunks": trunks,
+				"trunk_heights": trunk_heights,
 			})
 	
 	return {
@@ -1121,6 +1342,51 @@ func spawn_chunk(pos_of_chunk : Vector2, mesh_data: ArrayMesh, chunk_objects : A
 		collision_shape.shape = col_shape
 		static_body.add_child(collision_shape)
 		chunk_node.add_child(static_body)
+	
+	# Коллизия стволов деревьев (отдельный StaticBody3D, слой 1). Высота цилиндра — по AABB меша
+	# * масштаб (считается в потоке), над кроной стены нет.
+	#
+	# TODO (производительность, СНАЧАЛА ЗАМЕРИТЬ: число стволов на чанк и время этого блока в spawn_chunk):
+	# [3] Не создавать ноды CollisionShape3D, а добавлять шейпы прямо в физический сервер:
+	#     body = PhysicsServer3D.body_create(); body_set_mode(STATIC); body_set_space(get_world_3d().space);
+	#     body_add_shape(body, shape.get_rid(), Transform3D(Basis.IDENTITY, pos)); слой/маску задать через
+	#     body_set_collision_layer/mask. RID тела хранить на чанке и освобождать (PhysicsServer3D.free_rid)
+	#     при выгрузке чанка/в _do_clear_chunks — иначе утечка. Убирает сотни узлов на чанк.
+	# [4] Держать коллизию стволов только у чанков рядом с игроком и врагами (радиус 2-3 чанка):
+	#     дальше блок не создавать/удалять, при приближении создавать порциями (как grass_uploads_per_frame).
+	#     Данные "trunks"/"trunk_heights" уже лежат в chunk_objects — их надо сохранить на чанке для
+	#     отложенного создания. Самый большой выигрыш на больших мирах; не забыть про врагов вдали от игрока.
+	var trunk_body: StaticBody3D = null
+	var dbg_start_usec := Time.get_ticks_usec()
+	var dbg_trunk_count := 0
+	for entry in chunk_objects:
+		var trunk_list: Array = entry.get("trunks", [])
+		var trunk_heights: PackedFloat32Array = entry.get("trunk_heights", PackedFloat32Array())
+		for ti in trunk_list.size():
+			var trunk: Vector4 = trunk_list[ti]
+			if trunk_body == null:
+				trunk_body = StaticBody3D.new()
+				trunk_body.collision_layer = 1
+				trunk_body.collision_mask = 0
+				trunk_body.set_meta(TRUNK_BODY_META, true)
+				chunk_node.add_child(trunk_body)
+			dbg_trunk_count += 1
+			var cyl := _get_trunk_shape(trunk.w, trunk_heights[ti])
+			var shape_node := CollisionShape3D.new()
+			shape_node.shape = cyl
+			trunk_body.add_child(shape_node)
+			shape_node.position = Vector3(trunk.x, trunk.y, trunk.z)
+	if debug_trunk_stats:
+		var dbg_usec := Time.get_ticks_usec() - dbg_start_usec
+		_dbg_chunks += 1
+		_dbg_trunks_total += dbg_trunk_count
+		_dbg_trunks_max = maxi(_dbg_trunks_max, dbg_trunk_count)
+		_dbg_usec_total += dbg_usec
+		_dbg_usec_max = maxi(_dbg_usec_max, dbg_usec)
+		print("[trunk_stats] чанк %s: стволов %d, %.2f мс | всего чанков %d, стволов/чанк ср %.1f макс %d, мс ср %.2f макс %.2f, шейпов в кэше %d" % [
+				pos_of_chunk, dbg_trunk_count, dbg_usec / 1000.0, _dbg_chunks,
+				float(_dbg_trunks_total) / _dbg_chunks, _dbg_trunks_max,
+				_dbg_usec_total / 1000.0 / _dbg_chunks, _dbg_usec_max / 1000.0, _trunk_shape_cache.size()])
 	
 	# =========================================================================
 	# СПАВН ОБЪЕКТОВ ЧЕРЕЗ MULTIMESH
