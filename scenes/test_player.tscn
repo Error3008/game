@@ -10,6 +10,7 @@
 [ext_resource type="Resource" path="res://resources/ai/personality_duelist.tres" id="8_duelist"]
 [ext_resource type="Resource" path="res://resources/ai/personality_bully.tres" id="9_bully"]
 [ext_resource type="Resource" path="res://resources/ai/personality_turtle.tres" id="10_turtle"]
+[ext_resource type="Script" path="res://scripts/test_arena/test_lab.gd" id="11_lab"]
 
 [sub_resource type="Sky" id="Sky_env"]
 sky_material = ExtResource("2_sky")
@@ -140,3 +141,6 @@ mesh = SubResource("BoxMesh_wall_room")
 transform = Transform3D(-1, 0, -8.74228e-08, 0, 1, 0, 8.74228e-08, 0, -1, 0, 0.05, 8)
 is_dummy = true
 stats = ExtResource("7_agile")
+
+[node name="TestLab" type="Node3D" parent="."]
+script = ExtResource("11_lab")

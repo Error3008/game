@@ -562,6 +562,21 @@ func on_attack_deflected(by_node: Node3D) -> void:
 	stagger(0.8, by_node)
 
 
+## Полное восстановление живого актора: здоровье, стамина, заряды фляги, прерывание действий.
+## Для тестовой лаборатории (телепорт между клетками дуэлей). Мёртвого не воскрешает.
+func restore_full() -> void:
+	if not is_alive():
+		return
+	_cancel_all_actions()
+	abort_action()
+	is_staggered = false
+	stagger_timer = 0.0
+	velocity = Vector3.ZERO
+	health_component.init_health(health_component.max_health)
+	stamina_component.restore(stamina_component.max_stamina)
+	heal_component.init_from_stats(stats)
+
+
 func is_alive() -> bool:
 	return is_instance_valid(health_component) and not health_component.is_dead
 

@@ -230,6 +230,12 @@ func _set_target(target: Node3D) -> void:
 		spring_arm_pivot.lock_target = target
 
 
+## Публично снимает лок и цель (телепорт, смена арены): чистит и актора, и камеру.
+func release_lock() -> void:
+	is_lock_enabled = false
+	_clear_target()
+
+
 func _clear_target() -> void:
 	actor.cmd_clear_target()
 	if is_instance_valid(spring_arm_pivot) and "lock_target" in spring_arm_pivot:
