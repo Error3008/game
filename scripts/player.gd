@@ -14,7 +14,7 @@ var is_lock_enabled: bool:
 
 
 func _ready() -> void:
-	hitbox_target_mask = 4 # Scans enemies (collision layer 4)
+	hitbox_target_mask = LAYER_ENEMY_SIDE
 
 	if stats == null:
 		stats = preload("res://resources/stats/player_stats.tres")

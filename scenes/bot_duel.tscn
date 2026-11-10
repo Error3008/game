@@ -1,0 +1,44 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/tools/bot_duel.gd" id="1_duel"]
+[ext_resource type="Material" uid="uid://dejwcycs36i40" path="res://materials/sky_material.tres" id="2_sky"]
+[ext_resource type="Material" path="res://materials/prototype_grid.tres" id="3_grid"]
+
+[sub_resource type="Sky" id="Sky_env"]
+sky_material = ExtResource("2_sky")
+
+[sub_resource type="Environment" id="Environment_duel"]
+background_mode = 2
+sky = SubResource("Sky_env")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(60, 1, 60)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+material = ExtResource("3_grid")
+size = Vector3(60, 1, 60)
+
+[node name="BotDuel" type="Node3D"]
+script = ExtResource("1_duel")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_duel")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
+light_color = Color(1, 0.96, 0.88, 1)
+light_energy = 1.8
+shadow_enabled = true
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+collision_mask = 6
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_floor")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_floor")

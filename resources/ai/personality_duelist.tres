@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="AIPersonality" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/ai_personality.gd" id="1_gj383"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_j56g5"]
+[ext_resource type="Resource" path="res://resources/ai/trait_rational.tres" id="3_qegtl"]
+[ext_resource type="Resource" path="res://resources/ai/trait_aggressive.tres" id="4_hkce0"]
+[ext_resource type="Resource" path="res://resources/ai/trait_coward.tres" id="5_cjj5u"]
+
+[resource]
+script = ExtResource("1_gj383")
+display_name = "Duelist"
+traits = Dictionary[ExtResource("2_j56g5"), float]({
+ExtResource("3_qegtl"): 0.6,
+ExtResource("4_hkce0"): 0.3,
+ExtResource("5_cjj5u"): 0.1
+})

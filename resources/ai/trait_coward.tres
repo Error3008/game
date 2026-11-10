@@ -1,0 +1,69 @@
+[gd_resource type="Resource" script_class="TraitProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_effect.gd" id="1_6t60w"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_j1teq"]
+
+[sub_resource type="Resource" id="Resource_57iph"]
+script = ExtResource("1_6t60w")
+param = &"dodge_chance"
+multiplier = 1.4
+
+[sub_resource type="Resource" id="Resource_mdi6p"]
+script = ExtResource("1_6t60w")
+param = &"block_chance"
+multiplier = 1.3
+
+[sub_resource type="Resource" id="Resource_fus7v"]
+script = ExtResource("1_6t60w")
+param = &"parry_chance"
+multiplier = 0.8
+
+[sub_resource type="Resource" id="Resource_4ew1g"]
+script = ExtResource("1_6t60w")
+param = &"tactical_block_chance"
+multiplier = 1.5
+
+[sub_resource type="Resource" id="Resource_h4n5f"]
+script = ExtResource("1_6t60w")
+param = &"kick_chance"
+multiplier = 0.7
+
+[sub_resource type="Resource" id="Resource_yok6n"]
+script = ExtResource("1_6t60w")
+param = &"light_attack_chance"
+multiplier = 1.2
+
+[sub_resource type="Resource" id="Resource_w5uch"]
+script = ExtResource("1_6t60w")
+param = &"attack_cooldown"
+multiplier = 1.6
+
+[sub_resource type="Resource" id="Resource_r6bwh"]
+script = ExtResource("1_6t60w")
+param = &"kick_cooldown"
+multiplier = 1.4
+
+[sub_resource type="Resource" id="Resource_mwcyc"]
+script = ExtResource("1_6t60w")
+param = &"reaction_time"
+multiplier = 1.1
+
+[sub_resource type="Resource" id="Resource_2jqxb"]
+script = ExtResource("1_6t60w")
+param = &"engage_dist"
+multiplier = 0.8
+
+[sub_resource type="Resource" id="Resource_x4vrg"]
+script = ExtResource("1_6t60w")
+param = &"heal_hp_threshold"
+multiplier = 1.5
+
+[sub_resource type="Resource" id="Resource_ypcjx"]
+script = ExtResource("1_6t60w")
+param = &"heal_safe_distance"
+multiplier = 1.4
+
+[resource]
+script = ExtResource("2_j1teq")
+display_name = "Coward"
+effects = Array[ExtResource("1_6t60w")]([SubResource("Resource_57iph"), SubResource("Resource_mdi6p"), SubResource("Resource_fus7v"), SubResource("Resource_4ew1g"), SubResource("Resource_h4n5f"), SubResource("Resource_yok6n"), SubResource("Resource_w5uch"), SubResource("Resource_r6bwh"), SubResource("Resource_mwcyc"), SubResource("Resource_2jqxb"), SubResource("Resource_x4vrg"), SubResource("Resource_ypcjx")])

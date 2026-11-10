@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="AIPersonality" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/ai_personality.gd" id="1_fvs5e"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_qxv7v"]
+[ext_resource type="Resource" path="res://resources/ai/trait_aggressive.tres" id="3_hd11i"]
+[ext_resource type="Resource" path="res://resources/ai/trait_rational.tres" id="4_yh3mv"]
+
+[resource]
+script = ExtResource("1_fvs5e")
+display_name = "Bully"
+traits = Dictionary[ExtResource("2_qxv7v"), float]({
+ExtResource("3_hd11i"): 0.8,
+ExtResource("4_yh3mv"): 0.2
+})

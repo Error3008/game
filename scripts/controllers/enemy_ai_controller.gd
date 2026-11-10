@@ -8,6 +8,22 @@ enum State {
 	ATTACK_APPROACH
 }
 
+# --- Targeting ---
+## Группы, в которые должен входить вошедший в DetectionArea узел, чтобы стать целью.
+## Обычный враг видит игрока и ботов-союзников; бот-союзник (Enemy.Team.ALLY) видит только "enemy".
+@export var target_groups: Array[StringName] = [&"player", &"ally"]
+
+# --- Personality ---
+## Кэш множителей личности по ключам AIParams (сбрасывается при смене personality).
+var _mult_cache: Dictionary = {}
+
+@export_group("Personality")
+## Характер масштабирует базовые параметры ниже (какие именно — см. AIParams). null = параметры как есть.
+@export var personality: AIPersonality = null:
+	set(value):
+		personality = value
+		_mult_cache.clear()
+
 # --- Dummy / Training ---
 @export_group("Dummy / Training")
 @export var is_dummy: bool = false
@@ -22,6 +38,23 @@ enum State {
 @export var attack_approach_timeout: float = 2.5
 @export var attack_cooldown_min: float = 2.5
 @export var attack_cooldown_max: float = 4.5
+## Лёгкая атака: база шанса выбрать её вместо тяжёлой (личность масштабирует), её дальность удара.
+## При нехватке стамины на тяжёлую ИИ бьёт лёгкой вместо медленной «изнурённой» атаки.
+@export var can_light_attack: bool = true
+@export_range(0.0, 1.0, 0.05) var light_attack_chance: float = 0.30
+@export var light_strike_reach: float = 1.3
+
+# --- Healing ---
+@export_group("Healing")
+@export var can_heal_self: bool = true
+## Доля HP, ниже которой ИИ хочет выпить флягу (личность масштабирует).
+@export_range(0.0, 0.9, 0.05) var heal_hp_threshold: float = 0.35
+## Минимальная дистанция до цели для питья, м (личность масштабирует). Ближе — ИИ отступает.
+@export var heal_safe_distance: float = 5.0
+## Сколько секунд отступать ради питья, прежде чем сдаться и драться дальше.
+@export var heal_retreat_timeout: float = 2.5
+## Пауза после сдачи, прежде чем снова пытаться отступить и выпить.
+@export var heal_retry_delay: float = 5.0
 
 # --- Combat Dodge / Reactions ---
 @export_group("Combat Dodge / Reactions")
@@ -74,6 +107,10 @@ var dodge_cooldown_timer: float = 0.0
 var kick_cooldown_timer: float = 0.0
 var block_hold_timer: float = 0.0
 var approach_time_elapsed: float = 0.0
+## Выбор типа ближайшей атаки: бросается один раз за цикл перезарядки (чтобы дальность не «мигала» по кадрам).
+var _planned_light: bool = false
+var _heal_retreat_elapsed: float = 0.0
+var _heal_retry_timer: float = 0.0
 
 # Pending reaction
 var is_dodge_pending: bool = false
@@ -92,7 +129,91 @@ func _ready() -> void:
 		return
 
 	attack_cooldown_timer = randf_range(1.5, 3.5)
+	_plan_next_attack()
 	_setup_detection_area()
+
+
+## Базовое значение параметра с учётом личности. Базы (@export) читаются вживую, кэшируются лишь множители.
+func _p(key: StringName, base: float) -> float:
+	if personality == null:
+		return base
+	if not _mult_cache.has(key):
+		_mult_cache[key] = personality.multiplier_for(key)
+	return AIParams.clamp_value(key, base * (_mult_cache[key] as float))
+
+
+## Случайное значение в [lo, hi], где обе границы масштабируются личностью (паузы, время реакции).
+func _roll_scaled(key: StringName, lo: float, hi: float) -> float:
+	return randf_range(_p(key, lo), _p(key, hi))
+
+
+## Бросает кубик: лёгкая или тяжёлая атака в следующий раз.
+func _plan_next_attack() -> void:
+	_planned_light = can_light_attack and randf() <= _p(AIParams.LIGHT_ATTACK_CHANCE, light_attack_chance)
+
+
+## Запускает паузу до следующей атаки и планирует её тип.
+func _start_attack_cooldown() -> void:
+	attack_cooldown_timer = _roll_scaled(AIParams.ATTACK_COOLDOWN, attack_cooldown_min, attack_cooldown_max)
+	_plan_next_attack()
+
+
+## Лёгкая ли будет ближайшая атака: по плану или вынужденно, если на тяжёлую не хватает стамины.
+func _use_light_attack() -> bool:
+	if not can_light_attack or not _has_light_weapon():
+		return false
+	if _planned_light:
+		return true
+	var atk: MeleeAttackComponent = actor.attack_component
+	if actor.stamina_component and is_instance_valid(atk) and is_instance_valid(atk.heavy_weapon_data):
+		return not actor.stamina_component.can_afford(atk.heavy_weapon_data.stamina_cost)
+	return false
+
+
+func _has_light_weapon() -> bool:
+	return is_instance_valid(actor.attack_component) and is_instance_valid(actor.attack_component.light_weapon_data)
+
+
+func _planned_strike_reach() -> float:
+	return light_strike_reach if _use_light_attack() else strike_effective_reach
+
+
+func _execute_planned_attack() -> bool:
+	if _use_light_attack():
+		return actor.cmd_attack_light()
+	return actor.cmd_attack()
+
+
+## Хочет ли ИИ сейчас лечиться: HP ниже порога, есть заряд, нет паузы после неудачного отступления.
+func _wants_heal() -> bool:
+	if is_dummy or not can_heal_self or _heal_retry_timer > 0.0:
+		return false
+	var hc: HealComponent = actor.heal_component
+	if not is_instance_valid(hc) or not hc.can_heal():
+		return false
+	if actor.max_health <= 0.0:
+		return false
+	return actor.current_health / actor.max_health < _p(AIParams.HEAL_HP_THRESHOLD, heal_hp_threshold)
+
+
+## Лечение: питьё на безопасной дистанции, иначе отступление. true = кадр занят лечением.
+func _process_heal(dist: float, delta: float) -> bool:
+	if not _wants_heal():
+		_heal_retreat_elapsed = 0.0
+		return false
+	if actor.is_blocking():
+		actor.cmd_block_release()
+	if dist >= _p(AIParams.HEAL_SAFE_DISTANCE, heal_safe_distance):
+		_heal_retreat_elapsed = 0.0
+		return actor.cmd_heal()
+	_heal_retreat_elapsed += delta
+	if _heal_retreat_elapsed > heal_retreat_timeout:
+		# Оторваться не вышло: деремся дальше, повторим попытку позже.
+		_heal_retreat_elapsed = 0.0
+		_heal_retry_timer = heal_retry_delay
+		return false
+	actor.cmd_combat_move(0.0, -1.0)
+	return true
 
 
 func _setup_detection_area() -> void:
@@ -108,10 +229,13 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(actor) or not actor.is_alive():
 		return
 
-	if actor.is_staggered or actor.is_dashing or actor.is_attacking or actor.is_kicking:
+	if actor.is_staggered or actor.is_dashing or actor.is_attacking or actor.is_kicking or actor.is_healing:
 		is_dodge_pending = false
 		is_defense_pending = false
 		return
+
+	if _heal_retry_timer > 0.0:
+		_heal_retry_timer -= delta
 
 	if dodge_cooldown_timer > 0.0:
 		dodge_cooldown_timer -= delta
@@ -148,6 +272,7 @@ func _physics_process(delta: float) -> void:
 			target = null
 			actor.cmd_clear_target()
 			current_state = State.IDLE
+			_reacquire_target()
 
 	match current_state:
 		State.IDLE:
@@ -179,7 +304,7 @@ func _process_chase(_delta: float) -> void:
 		current_state = State.IDLE
 		return
 
-	if dist <= combat_engage_dist or is_dummy:
+	if dist <= _p(AIParams.ENGAGE_DIST, combat_engage_dist) or is_dummy:
 		current_state = State.COMBAT
 		combat_action_timer = 0.0
 		actor.cmd_set_target(target)
@@ -223,15 +348,19 @@ func _process_combat(delta: float) -> void:
 			is_player_blocking = target.defense_component.is_blocking()
 
 		if is_player_blocking and not actor.is_attacking and not actor.is_kicking:
-			if randf() <= kick_chance_on_blocking_player:
+			if randf() <= _p(AIParams.KICK_CHANCE, kick_chance_on_blocking_player):
 				if actor.is_blocking():
 					actor.cmd_block_release()
 				actor.cmd_kick()
-				kick_cooldown_timer = randf_range(kick_cooldown_min, kick_cooldown_max)
+				kick_cooldown_timer = _roll_scaled(AIParams.KICK_COOLDOWN, kick_cooldown_min, kick_cooldown_max)
 				return
 
 	# Dodge / block reaction check
 	if _check_dodge_reaction(dist):
+		return
+
+	# Healing: drink a flask when low on HP (retreat first if the target is too close)
+	if _process_heal(dist, delta):
 		return
 
 	# Attack decision
@@ -240,13 +369,13 @@ func _process_combat(delta: float) -> void:
 		if is_dummy:
 			if dummy_can_attack and not actor.is_attacking:
 				actor.cmd_attack()
-				attack_cooldown_timer = randf_range(attack_cooldown_min, attack_cooldown_max)
+				_start_attack_cooldown()
 			return
 		else:
-			if dist <= strike_effective_reach:
+			if dist <= _planned_strike_reach():
 				if not actor.is_attacking:
-					actor.cmd_attack()
-					attack_cooldown_timer = randf_range(attack_cooldown_min, attack_cooldown_max)
+					_execute_planned_attack()
+					_start_attack_cooldown()
 					combat_action_timer = randf_range(0.8, 1.8)
 				return
 			elif dist <= attack_range:
@@ -288,7 +417,7 @@ func _pick_new_orbit_action() -> void:
 		combat_action_timer = randf_range(0.6, 1.2)
 
 	# Tactical blocking while maneuvering in combat
-	if not is_dummy and can_block and randf() <= tactical_block_chance and not actor.is_blocking():
+	if not is_dummy and can_block and randf() <= _p(AIParams.TACTICAL_BLOCK_CHANCE, tactical_block_chance) and not actor.is_blocking():
 		actor.cmd_block_start()
 		block_hold_timer = randf_range(block_duration_min, block_duration_max)
 
@@ -317,18 +446,24 @@ func _process_attack_approach(delta: float) -> void:
 		current_state = State.CHASE
 		return
 
+	# Передумал атаковать: надо лечиться (COMBAT сам отступит и выпьет)
+	if _wants_heal():
+		current_state = State.COMBAT
+		return
+
 	approach_time_elapsed += delta
 
-	if dist <= strike_effective_reach:
-		actor.cmd_attack()
+	if dist <= _planned_strike_reach():
+		_execute_planned_attack()
 		current_state = State.COMBAT
-		attack_cooldown_timer = randf_range(attack_cooldown_min, attack_cooldown_max)
+		_start_attack_cooldown()
 		combat_action_timer = randf_range(0.8, 1.8)
 		return
 
 	if approach_time_elapsed >= attack_approach_timeout:
 		current_state = State.COMBAT
 		attack_cooldown_timer = randf_range(1.0, 2.0)
+		_plan_next_attack()
 		combat_action_timer = randf_range(0.8, 1.5)
 		return
 
@@ -352,9 +487,10 @@ func _check_dodge_reaction(dist: float) -> bool:
 	# Target is attacking: check threat range
 	if dist <= dodge_trigger_distance:
 		_has_reacted_to_attack = true
-		var delay := randf_range(reaction_time_min, reaction_time_max)
-		var wants_dodge: bool = can_dodge and (randf() <= dodge_chance)
-		var effective_cooldown := 0.0 if dodge_chance >= 0.99 else dodge_cooldown_timer
+		var delay := _roll_scaled(AIParams.REACTION_TIME, reaction_time_min, reaction_time_max)
+		var eff_dodge_chance: float = _p(AIParams.DODGE_CHANCE, dodge_chance)
+		var wants_dodge: bool = can_dodge and (randf() <= eff_dodge_chance)
+		var effective_cooldown := 0.0 if eff_dodge_chance >= 0.99 else dodge_cooldown_timer
 
 		var can_dash_now: bool = is_instance_valid(actor.dash_component) and actor.dash_component.can_dash()
 		if wants_dodge and effective_cooldown <= 0.0 and can_dash_now:
@@ -365,8 +501,8 @@ func _check_dodge_reaction(dist: float) -> bool:
 				is_defense_pending = true
 				pending_defense_timer = delay
 			return true
-		elif can_block and (randf() <= block_chance):
-			if randf() <= parry_chance:
+		elif can_block and (randf() <= _p(AIParams.BLOCK_CHANCE, block_chance)):
+			if randf() <= _p(AIParams.PARRY_CHANCE, parry_chance):
 				pending_defense_action = 3 # Parry (block + deflect)
 				delay = maxf(delay, _parry_start_delay())
 			else:
@@ -436,13 +572,38 @@ func _execute_random_dodge() -> void:
 
 # --- Detection Area Signals ---
 
+func _is_target_body(body: Node3D) -> bool:
+	for group in target_groups:
+		if body.is_in_group(group):
+			return true
+	return false
+
+
 func _on_detection_area_body_entered(body: Node3D) -> void:
 	if body == actor:
 		return
-	if body.is_in_group("player"):
+	if _is_target_body(body):
+		# Уже есть живая цель — не переключаемся, иначе target контроллера разойдётся с локом актора.
+		if is_instance_valid(target) and target != body:
+			return
 		target = body
 		if current_state == State.IDLE:
 			current_state = State.CHASE
+
+
+## После потери цели берёт другую живую подходящую цель, которая уже стоит в DetectionArea.
+func _reacquire_target() -> void:
+	var area := actor.get_node_or_null("DetectionArea") as Area3D
+	if not is_instance_valid(area):
+		return
+	for body in area.get_overlapping_bodies():
+		if body == actor or not _is_target_body(body):
+			continue
+		if body.has_method("is_alive") and not body.is_alive():
+			continue
+		target = body
+		current_state = State.CHASE
+		return
 
 
 func _on_detection_area_body_exited(body: Node3D) -> void:

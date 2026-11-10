@@ -10,6 +10,10 @@ const ACTION_HIT_REACT: StringName = &"hit_react"
 const ACTION_STAGGER: StringName = &"stagger"
 const ACTION_DEATH: StringName = &"death"
 const ACTION_HEAL: StringName = &"heal"
+## Слои коллизий (битовые маски; совпадают со слоями в .tscn): рельеф/пол, игрок и его союзники, враги.
+const LAYER_WORLD: int = 1
+const LAYER_PLAYER_SIDE: int = 2
+const LAYER_ENEMY_SIDE: int = 4
 ## Длительность клипа Stagger (с) — для масштаба времени под длительность оглушения.
 const STAGGER_CLIP_LENGTH: float = 1.17
 ## Через сколько секунд после старта Death замораживаем позу трупа (клип 2.0 с, после 1.58 неподвижен).
@@ -586,7 +590,7 @@ func _on_died(attacker: Node3D) -> void:
 	# Keep collision shape enabled so corpse never falls through the floor!
 	# Set layer to 0 (no targeting/hits) and mask to 1 (floor/platforms only).
 	collision_layer = 0
-	collision_mask = 1
+	collision_mask = LAYER_WORLD
 	velocity.x = 0.0
 	velocity.z = 0.0
 

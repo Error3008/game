@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="AIPersonality" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/ai_personality.gd" id="1_3x6cu"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_cn05r"]
+[ext_resource type="Resource" path="res://resources/ai/trait_coward.tres" id="3_ls50f"]
+[ext_resource type="Resource" path="res://resources/ai/trait_rational.tres" id="4_8e0tn"]
+
+[resource]
+script = ExtResource("1_3x6cu")
+display_name = "Turtle"
+traits = Dictionary[ExtResource("2_cn05r"), float]({
+ExtResource("3_ls50f"): 0.6,
+ExtResource("4_8e0tn"): 0.4
+})

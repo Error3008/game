@@ -1,0 +1,64 @@
+[gd_resource type="Resource" script_class="TraitProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_effect.gd" id="1_m8bu2"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_40g0y"]
+
+[sub_resource type="Resource" id="Resource_xkhbp"]
+script = ExtResource("1_m8bu2")
+param = &"dodge_chance"
+multiplier = 0.7
+
+[sub_resource type="Resource" id="Resource_fjxke"]
+script = ExtResource("1_m8bu2")
+param = &"block_chance"
+multiplier = 0.6
+
+[sub_resource type="Resource" id="Resource_oj1sl"]
+script = ExtResource("1_m8bu2")
+param = &"parry_chance"
+multiplier = 0.8
+
+[sub_resource type="Resource" id="Resource_cycq3"]
+script = ExtResource("1_m8bu2")
+param = &"tactical_block_chance"
+multiplier = 0.5
+
+[sub_resource type="Resource" id="Resource_ntpq4"]
+script = ExtResource("1_m8bu2")
+param = &"kick_chance"
+multiplier = 1.2
+
+[sub_resource type="Resource" id="Resource_rdtam"]
+script = ExtResource("1_m8bu2")
+param = &"light_attack_chance"
+multiplier = 1.3
+
+[sub_resource type="Resource" id="Resource_qae5k"]
+script = ExtResource("1_m8bu2")
+param = &"attack_cooldown"
+multiplier = 0.6
+
+[sub_resource type="Resource" id="Resource_5tori"]
+script = ExtResource("1_m8bu2")
+param = &"kick_cooldown"
+multiplier = 0.8
+
+[sub_resource type="Resource" id="Resource_toy3c"]
+script = ExtResource("1_m8bu2")
+param = &"engage_dist"
+multiplier = 1.2
+
+[sub_resource type="Resource" id="Resource_d7h4q"]
+script = ExtResource("1_m8bu2")
+param = &"heal_hp_threshold"
+multiplier = 0.6
+
+[sub_resource type="Resource" id="Resource_1dp2q"]
+script = ExtResource("1_m8bu2")
+param = &"heal_safe_distance"
+multiplier = 0.7
+
+[resource]
+script = ExtResource("2_40g0y")
+display_name = "Aggressive"
+effects = Array[ExtResource("1_m8bu2")]([SubResource("Resource_xkhbp"), SubResource("Resource_fjxke"), SubResource("Resource_oj1sl"), SubResource("Resource_cycq3"), SubResource("Resource_ntpq4"), SubResource("Resource_rdtam"), SubResource("Resource_qae5k"), SubResource("Resource_5tori"), SubResource("Resource_toy3c"), SubResource("Resource_d7h4q"), SubResource("Resource_1dp2q")])

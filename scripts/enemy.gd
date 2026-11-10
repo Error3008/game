@@ -3,6 +3,16 @@ extends CombatCharacter3D
 
 @onready var ai_controller: EnemyAIController = get_node_or_null("EnemyAIController")
 
+enum Team {
+	HOSTILE, ## обычный враг: слой 4, бьёт по игроку (слой 2)
+	ALLY,    ## бот на стороне игрока (дуэли ботов): слой 2, группа "ally", бьёт по врагам (слой 4)
+}
+
+@export var team: Team = Team.HOSTILE
+
+## Характер ИИ этого врага (передаётся контроллеру в _ready). null = базовые параметры контроллера.
+@export var personality: AIPersonality = null
+
 var _is_dummy: bool = false
 var _dummy_can_attack: bool = false
 var _dummy_always_block: bool = false
@@ -135,7 +145,17 @@ var player: Node3D:
 
 
 func _ready() -> void:
-	hitbox_target_mask = 2 # Scans player (collision layer 2)
+	if team == Team.ALLY:
+		hitbox_target_mask = LAYER_ENEMY_SIDE
+		collision_layer = LAYER_PLAYER_SIDE
+		collision_mask = LAYER_WORLD | LAYER_ENEMY_SIDE
+		remove_from_group("enemy")
+		add_to_group("ally")
+		var detection := get_node_or_null("DetectionArea") as Area3D
+		if is_instance_valid(detection):
+			detection.collision_mask = LAYER_ENEMY_SIDE
+	else:
+		hitbox_target_mask = LAYER_PLAYER_SIDE
 
 	if stats == null:
 		stats = preload("res://resources/stats/enemy_stats.tres")
@@ -172,6 +192,9 @@ func _ready() -> void:
 
 	ai_controller = get_node_or_null("EnemyAIController") as EnemyAIController
 	if is_instance_valid(ai_controller):
+		ai_controller.personality = personality
+		if team == Team.ALLY:
+			ai_controller.target_groups = [&"enemy"]
 		ai_controller.is_dummy = _is_dummy
 		ai_controller.dummy_can_attack = _dummy_can_attack
 		ai_controller.dummy_always_block = _dummy_always_block

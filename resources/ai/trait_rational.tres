@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="TraitProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_effect.gd" id="1_6l6bx"]
+[ext_resource type="Script" path="res://scripts/combat/ai/trait_profile.gd" id="2_lfcwj"]
+
+[sub_resource type="Resource" id="Resource_dtat5"]
+script = ExtResource("1_6l6bx")
+param = &"block_chance"
+multiplier = 1.1
+
+[sub_resource type="Resource" id="Resource_xjrwi"]
+script = ExtResource("1_6l6bx")
+param = &"parry_chance"
+multiplier = 1.4
+
+[sub_resource type="Resource" id="Resource_f8bsp"]
+script = ExtResource("1_6l6bx")
+param = &"kick_chance"
+multiplier = 1.3
+
+[sub_resource type="Resource" id="Resource_rj2wf"]
+script = ExtResource("1_6l6bx")
+param = &"reaction_time"
+multiplier = 0.8
+
+[sub_resource type="Resource" id="Resource_ycjcx"]
+script = ExtResource("1_6l6bx")
+param = &"heal_safe_distance"
+multiplier = 1.2
+
+[resource]
+script = ExtResource("2_lfcwj")
+display_name = "Rational"
+effects = Array[ExtResource("1_6l6bx")]([SubResource("Resource_dtat5"), SubResource("Resource_xjrwi"), SubResource("Resource_f8bsp"), SubResource("Resource_rj2wf"), SubResource("Resource_ycjcx")])

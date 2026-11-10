@@ -7,6 +7,9 @@
 [ext_resource type="Resource" uid="uid://8li0oyhdndi4" path="res://resources/stats/enemy_balanced.tres" id="5_balanced"]
 [ext_resource type="Resource" uid="uid://cp4uh6j3oi6or" path="res://resources/stats/enemy_armored.tres" id="6_armored"]
 [ext_resource type="Resource" uid="uid://5mlfbpiu82we" path="res://resources/stats/enemy_agile.tres" id="7_agile"]
+[ext_resource type="Resource" path="res://resources/ai/personality_duelist.tres" id="8_duelist"]
+[ext_resource type="Resource" path="res://resources/ai/personality_bully.tres" id="9_bully"]
+[ext_resource type="Resource" path="res://resources/ai/personality_turtle.tres" id="10_turtle"]
 
 [sub_resource type="Sky" id="Sky_env"]
 sky_material = ExtResource("2_sky")
@@ -64,6 +67,17 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, -14)
 can_dodge = false
 stats = ExtResource("5_balanced")
+personality = ExtResource("8_duelist")
+
+[node name="Enemy_Bully" parent="." instance=ExtResource("3_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.05, 6)
+stats = ExtResource("7_agile")
+personality = ExtResource("9_bully")
+
+[node name="Enemy_Turtle" parent="." instance=ExtResource("3_enemy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 0.05, 6)
+stats = ExtResource("6_armored")
+personality = ExtResource("10_turtle")
 
 [node name="ObstacleRooms" type="Node3D" parent="." unique_id=415118311]
 
