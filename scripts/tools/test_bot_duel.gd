@@ -10,13 +10,10 @@ func _init() -> void:
 func _run_tests() -> void:
 	print("--- STARTING BOT DUEL TESTS ---")
 	seed(4242)
-	var duel: Node = (load("res://scenes/bot_duel.tscn") as PackedScene).instantiate()
-	root.add_child(duel)
+	var duel: Node = DuelRunner.create_duel(self)
 	await process_frame
 	# Два агрессора с одинаковым билдом: бой должен закончиться быстро
-	duel._sel_personality = [1, 1] as Array[int]
-	duel._sel_build = [0, 0] as Array[int]
-	duel._start_round()
+	DuelRunner.start_round(duel, 0, 1, 0, 1)
 	await physics_frame
 	await physics_frame
 
@@ -42,13 +39,10 @@ func _run_tests() -> void:
 
 	print("\n[TEST 3] The duel ends: both land hits, one dies, a winner is recorded")
 	Engine.time_scale = 8.0
-	var a_hit: bool = false
-	var b_hit: bool = false
-	while not duel._round_over and duel._round_time < 120.0:
-		await physics_frame
-		a_hit = a_hit or b.current_health < b.max_health
-		b_hit = b_hit or a.current_health < a.max_health
+	var res: Dictionary = await DuelRunner.wait_round_end(self, duel, 120.0)
 	Engine.time_scale = 1.0
+	var a_hit: bool = res["a_hit_b"]
+	var b_hit: bool = res["b_hit_a"]
 	print("   round time %.1fs, A hp %.0f, B hp %.0f, wins %s, draws %d" % [duel._round_time, a.current_health, b.current_health, str(duel._wins), duel._draws])
 	assert(a_hit and b_hit, "Both bots damage each other (A hit B: %s, B hit A: %s)" % [a_hit, b_hit])
 	assert(duel._round_over, "The duel ended within 120s")
