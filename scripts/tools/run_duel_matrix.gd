@@ -12,6 +12,8 @@ extends SceneTree
 ##   scale=X            Engine.time_scale (по умолчанию 8)
 ##   maxtime=S          лимит раунда, с игровых (по умолчанию 90)
 ##   build=I            индекс билда для mode=personalities (по умолчанию 0: balanced)
+##   margin=P           победа по очкам: при ничьей (таймаут) выигрывает бот, у которого доля HP
+##                      выше на P процентных пунктов и больше (по умолчанию 15). Нокаут считается отдельно.
 ## Строки результата начинаются с «MATRIX|», остальной вывод — шум боевого лога: `| grep '^MATRIX|'`.
 ## Порядок индексов совпадает с bot_duel.gd: билды 0 balanced / 1 armored / 2 agile,
 ## личности 0 duelist / 1 bully / 2 turtle, 3 = нейтральная (добавляется здесь).
@@ -19,6 +21,9 @@ extends SceneTree
 const BUILD_NAMES: Array[String] = ["balanced", "armored", "agile"]
 const PERS_NAMES: Array[String] = ["duelist", "bully", "turtle", "none"]
 const NEUTRAL_PERS: int = 3
+
+## Порог победы по очкам, доля от максимума HP (задаётся margin=).
+var _margin: float = 0.15
 
 
 func _init() -> void:
@@ -32,6 +37,7 @@ func _run() -> void:
 	var scale: float = float(args.get("scale", "8"))
 	var max_time: float = float(args.get("maxtime", "90"))
 	var fixed_build: int = int(args.get("build", "0"))
+	_margin = float(args.get("margin", "15")) / 100.0
 
 	var duel: Node = DuelRunner.create_duel(self)
 	await process_frame
@@ -39,8 +45,8 @@ func _run() -> void:
 	neutral.display_name = "none"
 	duel.personalities.append(neutral)
 
-	print("MATRIX|mode=%s rounds=%d scale=%.1f maxtime=%.0f" % [mode, rounds, scale, max_time])
-	print("MATRIX|%s" % "A | B | A wins | B wins | draws | unfinished | avg time, s | avg winner HP")
+	print("MATRIX|mode=%s rounds=%d scale=%.1f maxtime=%.0f margin=%.0f%%" % [mode, rounds, scale, max_time, _margin * 100.0])
+	print("MATRIX|%s" % "A | B | A KO | B KO | A points | B points | draws | unfinished | avg time, s | avg winner HP (KO) | avg HP A / B at end")
 	var started_ms: int = Time.get_ticks_msec()
 	if mode == "personalities":
 		for a in 3:
@@ -67,7 +73,11 @@ func _run_pair(duel: Node, x: Array, y: Array, rounds: int, scale: float, max_ti
 func _run_cell(duel: Node, a: Array, b: Array, rounds: int, scale: float, max_time: float) -> void:
 	var a_wins: int = 0
 	var b_wins: int = 0
+	var a_points: int = 0
+	var b_points: int = 0
 	var draws: int = 0
+	var hp_a_sum: float = 0.0
+	var hp_b_sum: float = 0.0
 	var unfinished: int = 0
 	var time_sum: float = 0.0
 	var hp_sum: float = 0.0
@@ -85,13 +95,23 @@ func _run_cell(duel: Node, a: Array, b: Array, rounds: int, scale: float, max_ti
 				hp_sum += res["hp_b"]
 				decided += 1
 			DuelRunner.Outcome.DRAW:
-				draws += 1
+				# Таймаут: сравниваем доли HP; взаимный нокаут (оба 0) остаётся ничьей
+				var diff: float = float(res["hp_a"]) / float(res["max_hp_a"]) - float(res["hp_b"]) / float(res["max_hp_b"])
+				if diff >= _margin:
+					a_points += 1
+				elif diff <= -_margin:
+					b_points += 1
+				else:
+					draws += 1
 			_:
 				unfinished += 1
 		time_sum += res["time"]
+		hp_a_sum += res["hp_a"]
+		hp_b_sum += res["hp_b"]
 	var avg_hp: float = hp_sum / maxf(1.0, float(decided))
-	print("MATRIX|%s | %s | %d | %d | %d | %d | %.1f | %.0f" % [
-		_title(a), _title(b), a_wins, b_wins, draws, unfinished, time_sum / maxf(1.0, float(rounds)), avg_hp,
+	print("MATRIX|%s | %s | %d | %d | %d | %d | %d | %d | %.1f | %.0f | %.0f / %.0f" % [
+		_title(a), _title(b), a_wins, b_wins, a_points, b_points, draws, unfinished,
+		time_sum / maxf(1.0, float(rounds)), avg_hp, hp_a_sum / float(rounds), hp_b_sum / float(rounds),
 	])
 
 

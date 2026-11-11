@@ -29,7 +29,7 @@ static func start_round(duel: Node, build_a: int, pers_a: int, build_b: int, per
 
 ## Ждёт конца текущего раунда по физическим кадрам, пока не истечёт `max_time` секунд
 ## игрового времени. Возвращает словарь:
-##   outcome: Outcome, time: float (с), hp_a / hp_b: float (на момент конца),
+##   outcome: Outcome, time: float (с), hp_a / hp_b и max_hp_a / max_hp_b: float (на момент конца),
 ##   a_hit_b / b_hit_a: bool (наносил ли бот урон хоть раз).
 ## Если раунд не закончился за `max_time`, outcome = UNFINISHED.
 static func wait_round_end(tree: SceneTree, duel: Node, max_time: float) -> Dictionary:
@@ -59,6 +59,8 @@ static func wait_round_end(tree: SceneTree, duel: Node, max_time: float) -> Dict
 		"time": duel._round_time,
 		"hp_a": a.current_health,
 		"hp_b": b.current_health,
+		"max_hp_a": a.max_health,
+		"max_hp_b": b.max_health,
 		"a_hit_b": a_hit_b,
 		"b_hit_a": b_hit_a,
 	}
