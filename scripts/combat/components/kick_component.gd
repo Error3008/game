@@ -179,8 +179,7 @@ func _apply_kick_impact(target_node: Node3D) -> void:
 			target_node.stamina_component.trigger_guard_break(actor)
 
 		# 3. Apply damage and knockback
-		if target_node.has_method("take_damage"):
-			target_node.take_damage(guard_break_damage, knockback_dir * guard_break_knockback, actor)
+		_hit_target(target_node, guard_break_damage, knockback_dir * guard_break_knockback)
 
 		# 4. Apply heavy guard break stagger (1.5s stun)
 		if target_node.has_method("stagger"):
@@ -194,10 +193,16 @@ func _apply_kick_impact(target_node: Node3D) -> void:
 		# Target released RMB in time or was not in guard: no guard break, no 1.5s stun!
 		print("[%s] Kick struck %s (target was NOT blocking - no guard break)." % [actor.name, target_node.name])
 
-		if target_node.has_method("take_damage"):
-			target_node.take_damage(unblocked_damage, knockback_dir * unblocked_knockback, actor)
+		_hit_target(target_node, unblocked_damage, knockback_dir * unblocked_knockback)
 
 		kick_hit_landed.emit(target_node, false)
+
+
+func _hit_target(target_node: Node3D, dmg: float, knockback: Vector3) -> void:
+	if target_node.has_method("take_hit"):
+		target_node.take_hit(DamageInfo.make(dmg, knockback, actor, &"kick"))
+	elif target_node.has_method("take_damage"):
+		target_node.take_damage(dmg, knockback, actor)
 
 
 func cancel_kick() -> void:

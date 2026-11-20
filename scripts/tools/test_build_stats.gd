@@ -191,7 +191,7 @@ func _run_tests() -> void:
 	dfn.end_block()
 	assert(dfn.start_block(), "armored raises guard")
 	var stam_before: float = armored.stamina_component.current_stamina
-	var res: Dictionary = dfn.evaluate_hit(20.0, Vector3.ZERO, null)  # attacker=null -> удар «спереди»
+	var res: Dictionary = dfn.evaluate_hit(DamageInfo.make(20.0, Vector3.ZERO))  # attacker=null -> удар «спереди»
 	assert(res["was_blocked"], "hit is blocked")
 	# armor 8: цена блока 35 − 2×8 = 19
 	assert(_near(stam_before - armored.stamina_component.current_stamina, armored.stat(StatKeys.BLOCK_STAMINA_COST)), "block costs build-adjusted stamina")
@@ -217,7 +217,7 @@ func _run_tests() -> void:
 		armored.stamina_component.current_stamina = armored.stamina_component.max_stamina
 		assert(dfn.start_block(), "armored raises guard (hit cost %.0f)" % hit_cost)
 		var before: float = armored.stamina_component.current_stamina
-		var r: Dictionary = dfn.evaluate_hit(20.0, Vector3.ZERO, null, hit_cost)
+		var r: Dictionary = dfn.evaluate_hit(DamageInfo.make(20.0, Vector3.ZERO, null, &"direct", hit_cost))
 		assert(r["was_blocked"], "hit is blocked (hit cost %.0f)" % hit_cost)
 		var spent: float = before - armored.stamina_component.current_stamina
 		assert(_near(spent, costs[hit_cost]), "hit cost %.0f -> spent %.3f, expected %.3f" % [hit_cost, spent, costs[hit_cost]])
@@ -228,7 +228,7 @@ func _run_tests() -> void:
 		player.stamina_component.current_stamina = player.stamina_component.max_stamina
 		assert(neutral_dfn.start_block(), "player raises guard")
 		var before_n: float = player.stamina_component.current_stamina
-		neutral_dfn.evaluate_hit(20.0, Vector3.ZERO, null, hit_cost)
+		neutral_dfn.evaluate_hit(DamageInfo.make(20.0, Vector3.ZERO, null, &"direct", hit_cost))
 		assert(_near(before_n - player.stamina_component.current_stamina, hit_cost), "neutral build pays exactly %.0f" % hit_cost)
 	# Сквозная цепочка take_damage -> evaluate_hit: цена блока передаётся 4-м аргументом
 	neutral_dfn.end_block()

@@ -193,8 +193,12 @@ func can_block_from(attacker: Node3D) -> bool:
 	return facing.dot(to_attacker) >= block_angle_threshold
 
 
-## block_stamina: цена блока именно этого удара (WeaponData.block_stamina_damage), -1 = базовая цена блока.
-func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D, block_stamina: float = -1.0) -> Dictionary:
+## info.block_stamina: цена блока именно этого удара (WeaponData.block_stamina_damage), -1 = базовая цена блока.
+func evaluate_hit(info: DamageInfo) -> Dictionary:
+	var amount: float = info.amount
+	var knockback: Vector3 = info.knockback
+	var attacker: Node3D = info.attacker
+	var block_stamina: float = info.block_stamina
 	var result := {
 		"handled": false,
 		"damage_taken": amount,

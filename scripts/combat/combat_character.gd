@@ -456,59 +456,81 @@ func cmd_clear_target() -> void:
 # --- Combat Physics & Reactions ---
 
 ## block_stamina: цена блока этого удара в стамине защитника (WeaponData.block_stamina_damage); -1 = по умолчанию.
+## Тонкая обёртка над take_hit для прямых вызовов (тесты, простые источники урона): физический удар без флагов.
 func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D = null, block_stamina: float = -1.0) -> void:
+	take_hit(DamageInfo.make(amount, knockback_impulse, attacker_node, &"direct", block_stamina))
+
+
+## Единая точка урона. Возвращает итог удара для FX и ИИ:
+## dodged, was_parried, was_blocked, was_guard_broken, final_damage, reacted.
+func take_hit(info: DamageInfo) -> Dictionary:
+	var result := {
+		"dodged": false,
+		"was_parried": false,
+		"was_blocked": false,
+		"was_guard_broken": false,
+		"final_damage": 0.0,
+		"reacted": false
+	}
 	if not is_alive():
-		return
+		return result
+
+	var attacker_node: Node3D = info.attacker
+	var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 
 	# 1. I-frame check via DashComponent
 	if is_dashing and is_instance_valid(dash_component) and dash_component.is_in_iframe():
-		var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 		print("[%s] Dodged attack from %s via dash i-frame!" % [name, att_name])
-		return
+		result["dodged"] = true
+		return result
 
-	var final_damage := amount
-	var final_knockback := knockback_impulse
+	var final_damage := info.amount
+	var final_knockback := info.knockback
 	var was_blocked := false
 
 	# 2. DefenseComponent evaluation (Block, Parry, Penalty, Backstab check)
 	if is_instance_valid(defense_component):
-		var eval := defense_component.evaluate_hit(amount, knockback_impulse, attacker_node, block_stamina)
+		var eval := defense_component.evaluate_hit(info)
 		if eval["was_parried"]:
-			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
-			print("[%s] PERFECT PARRY against %s! Negated %.1f damage with 0 knockback." % [name, att_name, amount])
+			print("[%s] PERFECT PARRY against %s! Negated %.1f damage with 0 knockback." % [name, att_name, info.amount])
 			play_parry_success()
-			return
+			result["was_parried"] = true
+			return result
 
 		if eval["was_blocked"]:
 			was_blocked = true
 			final_damage = eval["damage_taken"]
 			final_knockback = eval["knockback_taken"]
-			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 			if eval.get("was_guard_broken", false):
+				result["was_guard_broken"] = true
 				print("[%s] GUARD BROKEN by %s! Defenses collapsed." % [name, att_name])
 			else:
-				print("[%s] Blocked attack from %s (took %.1f of %.1f damage)." % [name, att_name, final_damage, amount])
+				print("[%s] Blocked attack from %s (took %.1f of %.1f damage)." % [name, att_name, final_damage, info.amount])
 				play_block_impact()
 
 		if eval["was_penalty"]:
 			print("[%s] STRUCK DURING PARRY PENALTY! Defenses broken." % name)
 
+	result["was_blocked"] = was_blocked
+
 	# 2б. Множитель входящего урона от билда (броня/ловкость): после блока, до здоровья
 	final_damage *= stat(StatKeys.DAMAGE_TAKEN)
+	result["final_damage"] = final_damage
 
 	# 3. Apply damage to HealthComponent
 	if is_instance_valid(health_component):
 		health_component.take_damage(final_damage, attacker_node)
-		var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 		print("[%s] Took %.1f damage from %s. Remaining HP: %.1f" % [name, final_damage, att_name, health_component.current_health])
 
 	# 4. Hit reaction: чистое попадание прерывает текущее действие получателя
-	if is_alive() and not was_blocked and final_damage > 0.0 and not is_staggered:
+	if info.causes_hit_react and is_alive() and not was_blocked and final_damage > 0.0 and not is_staggered:
 		_react_to_hit()
+		result["reacted"] = true
 
 	# 5. Apply physical knockback
 	velocity.x += final_knockback.x
 	velocity.z += final_knockback.z
+	return result
 
 
 func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:

@@ -9,6 +9,9 @@ signal hit_landed(target: Node3D, damage: float)
 ## Цена блока этого удара в стамине защитника (из WeaponData). -1 = цена блока по умолчанию.
 @export var block_stamina_damage: float = -1.0
 
+## Метка источника для DamageInfo.source (&"heavy", &"light"); MeleeAttackComponent выставляет по типу атаки.
+var damage_source: StringName = &"heavy"
+
 @export_group("Debug")
 @export var debug_visual: bool = true
 
@@ -59,6 +62,21 @@ func _calculate_knockback_direction(target_node: Node3D) -> Vector3:
 	return default_dir
 
 
+## Собирает DamageInfo и отдаёт цели (take_hit, иначе take_damage). false — у цели нет приёмника урона.
+func _deal(receiver: Object, knockback_dir: Vector3) -> bool:
+	if receiver.has_method("take_hit"):
+		receiver.take_hit(_build_damage_info(knockback_dir))
+		return true
+	if receiver.has_method("take_damage"):
+		receiver.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
+		return true
+	return false
+
+
+func _build_damage_info(knockback_dir: Vector3) -> DamageInfo:
+	return DamageInfo.make(damage, knockback_dir * knockback_force, attacker, damage_source, block_stamina_damage)
+
+
 func _on_body_entered(body: Node3D) -> void:
 	if not is_active:
 		return
@@ -69,8 +87,7 @@ func _on_body_entered(body: Node3D) -> void:
 	var knockback_dir := _calculate_knockback_direction(body)
 
 	print("[Hitbox] Hit landed on: ", body.name, " (Damage: ", damage, ")")
-	if body.has_method("take_damage"):
-		body.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
+	_deal(body, knockback_dir)
 	hit_landed.emit(body, damage)
 
 
@@ -83,8 +100,6 @@ func _on_area_entered(area: Area3D) -> void:
 		var knockback_dir := _calculate_knockback_direction(owner_node)
 
 		print("[Hitbox] Hit landed on hurtbox: ", area.name, " belonging to ", owner_node.name)
-		if area.has_method("take_damage"):
-			area.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
-		elif owner_node.has_method("take_damage"):
-			owner_node.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
+		if not _deal(area, knockback_dir):
+			_deal(owner_node, knockback_dir)
 		hit_landed.emit(owner_node, damage)

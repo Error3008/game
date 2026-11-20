@@ -172,7 +172,7 @@ func _run_tests() -> void:
 	assert(dummy.is_blocking() == true, "Bot is_blocking should be true")
 
 	# Bot blocks incoming hit
-	var eval := dummy.defense_component.evaluate_hit(35.0, Vector3(0, 0, -2), player)
+	var eval := dummy.defense_component.evaluate_hit(DamageInfo.make(35.0, Vector3(0, 0, -2), player))
 	assert(eval["was_blocked"] == true, "Incoming strike must be absorbed by bot block")
 	assert(eval["damage_taken"] < 6.0, "Bot block should absorb 85% damage")
 	dummy.cmd_block_release()
