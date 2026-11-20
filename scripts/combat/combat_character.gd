@@ -3,6 +3,18 @@ extends CharacterBody3D
 
 signal character_died(attacker: Node3D)
 
+# --- События актора (шина для FX, ИИ, шкалы слома, записи боя) ---
+## Успешная команда: &"attack_light", &"attack_heavy" (data = WeaponData), &"block", &"parry", &"dash" (data = DashDirection), &"kick", &"heal".
+signal action_started(action: StringName, data: Variant)
+## Этот актор получил удар (в т.ч. уклон/парирование/блок). result — итог take_hit.
+signal hit_received(info: DamageInfo, result: Dictionary)
+## Этот актор нанёс удар цели (эмитится сразу после hit_received цели).
+signal hit_dealt(target: Node3D, info: DamageInfo, result: Dictionary)
+## Актор оглушён через stagger() (hit-react сюда не входит: см. result["reacted"]).
+signal staggered(duration: float, source: Node3D)
+## Фаза удара: &"windup", &"active", &"recovery", &"idle".
+signal attack_phase_changed(phase: StringName)
+
 # --- Имена состояний ActionSelect (AnimationTree) — единое место ---
 const ACTION_HEAVY: StringName = &"heavy_attack"
 const ACTION_LIGHT: StringName = &"light_attack"
@@ -129,6 +141,7 @@ func _discover_and_setup_components() -> void:
 	attack_component = get_node_or_null("MeleeAttackComponent") as MeleeAttackComponent
 	if is_instance_valid(attack_component):
 		attack_component.setup(self, hitbox_target_mask)
+		attack_component.attack_phase_changed.connect(func(p: StringName) -> void: attack_phase_changed.emit(p))
 
 	dash_component = get_node_or_null("DashComponent") as DashComponent
 	if is_instance_valid(dash_component):
@@ -386,7 +399,10 @@ func _start_attack(light: bool) -> bool:
 	if is_instance_valid(attack_component):
 		target_combat_movement = Vector2.ZERO
 		target_combat_mode = 1.0
-		return attack_component.start_attack(light)
+		var started := attack_component.start_attack(light)
+		if started:
+			action_started.emit(&"attack_light" if light else &"attack_heavy", attack_component.weapon_data)
+		return started
 	return false
 
 
@@ -394,7 +410,10 @@ func cmd_heal() -> bool:
 	if is_staggered or is_dashing or is_attacking or is_kicking or is_blocking() or not is_instance_valid(heal_component):
 		return false
 	target_combat_movement = Vector2.ZERO
-	return heal_component.start_heal()
+	var started := heal_component.start_heal()
+	if started:
+		action_started.emit(&"heal", null)
+	return started
 
 
 func cmd_kick() -> bool:
@@ -405,7 +424,10 @@ func cmd_kick() -> bool:
 	if is_instance_valid(kick_component):
 		target_combat_movement = Vector2.ZERO
 		target_combat_mode = 1.0
-		return kick_component.start_kick()
+		var started := kick_component.start_kick()
+		if started:
+			action_started.emit(&"kick", null)
+		return started
 	return false
 
 
@@ -431,13 +453,19 @@ func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
 		else:
 			return false
 
-	return dash_component.start_dash(chosen_dir)
+	var started := dash_component.start_dash(chosen_dir)
+	if started:
+		action_started.emit(&"dash", chosen_dir)
+	return started
 
 
 func cmd_block_start() -> bool:
 	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing or not is_instance_valid(defense_component):
 		return false
-	return defense_component.start_block()
+	var started := defense_component.start_block()
+	if started:
+		action_started.emit(&"block", null)
+	return started
 
 
 func cmd_block_release() -> void:
@@ -451,6 +479,7 @@ func cmd_parry() -> bool:
 	var success := defense_component.trigger_parry()
 	if success:
 		play_parry_success()
+		action_started.emit(&"parry", null)
 	return success
 
 
@@ -475,7 +504,18 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 ## Единая точка урона. Возвращает итог удара для FX и ИИ:
 ## dodged, was_parried, was_blocked, was_guard_broken, final_damage, reacted.
 func take_hit(info: DamageInfo) -> Dictionary:
-	var result := {
+	if not is_alive():
+		return _new_hit_result()
+	var result := _resolve_hit(info)
+	hit_received.emit(info, result)
+	var attacker_actor := info.attacker as CombatCharacter3D
+	if is_instance_valid(attacker_actor):
+		attacker_actor.hit_dealt.emit(self, info, result)
+	return result
+
+
+func _new_hit_result() -> Dictionary:
+	return {
 		"dodged": false,
 		"was_parried": false,
 		"was_blocked": false,
@@ -483,8 +523,10 @@ func take_hit(info: DamageInfo) -> Dictionary:
 		"final_damage": 0.0,
 		"reacted": false
 	}
-	if not is_alive():
-		return result
+
+
+func _resolve_hit(info: DamageInfo) -> Dictionary:
+	var result := _new_hit_result()
 
 	var attacker_node: Node3D = info.attacker
 	var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
@@ -557,6 +599,7 @@ func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:
 
 	is_staggered = true
 	stagger_timer = duration
+	staggered.emit(duration, from_node)
 
 	# Recoil backward from attacker / source / target
 	var away_dir := -get_forward_basis()

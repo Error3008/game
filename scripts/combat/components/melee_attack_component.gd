@@ -5,6 +5,13 @@ signal attack_started
 signal attack_hitbox_opened
 signal attack_hitbox_closed
 signal attack_finished
+## Смена фазы удара: &"windup", &"active", &"recovery", &"idle" (атака закончена или отменена).
+signal attack_phase_changed(phase: StringName)
+
+const PHASE_IDLE: StringName = &"idle"
+const PHASE_WINDUP: StringName = &"windup"
+const PHASE_ACTIVE: StringName = &"active"
+const PHASE_RECOVERY: StringName = &"recovery"
 
 enum InsufficientStaminaPolicy {
 	SLOW_ATTACK,
@@ -34,6 +41,7 @@ var is_attacking: bool = false
 var is_exhausted_attack: bool = false
 var attack_speed_scale: float = 1.0
 var attack_time_elapsed: float = 0.0
+var phase: StringName = PHASE_IDLE
 
 var actor: Node3D = null
 var weapon_hitbox: Hitbox = null
@@ -106,6 +114,7 @@ func start_attack(light: bool = false) -> bool:
 		actor.play_action(weapon_data.action_anim_name, attack_speed_scale)
 
 	attack_started.emit()
+	_set_phase(PHASE_WINDUP)
 	return true
 
 
@@ -122,6 +131,7 @@ func process_attack(delta: float) -> void:
 
 	# Phase 2: Active Swing
 	elif attack_time_elapsed < weapon_data.active_end_time:
+		_set_phase(PHASE_ACTIVE)
 		if is_instance_valid(weapon_hitbox) and not weapon_hitbox.is_active:
 			weapon_hitbox.apply_weapon(weapon_data)
 			weapon_hitbox.damage_source = &"light" if is_instance_valid(light_weapon_data) and weapon_data == light_weapon_data else &"heavy"
@@ -134,6 +144,7 @@ func process_attack(delta: float) -> void:
 
 	# Phase 3: Recovery
 	else:
+		_set_phase(PHASE_RECOVERY)
 		if is_instance_valid(weapon_hitbox) and weapon_hitbox.is_active:
 			weapon_hitbox.set_active(false)
 			attack_hitbox_closed.emit()
@@ -154,7 +165,15 @@ func cancel_attack() -> void:
 	if is_instance_valid(actor) and is_instance_valid(actor.animation_tree):
 		if "parameters/ActionTimeScale/scale" in actor.animation_tree:
 			actor.animation_tree.set("parameters/ActionTimeScale/scale", 1.0)
+	_set_phase(PHASE_IDLE)
 	attack_finished.emit()
+
+
+func _set_phase(new_phase: StringName) -> void:
+	if phase == new_phase:
+		return
+	phase = new_phase
+	attack_phase_changed.emit(new_phase)
 
 
 func end_attack() -> void:
