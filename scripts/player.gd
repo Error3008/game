@@ -60,4 +60,9 @@ func _ready() -> void:
 		feedback.name = "CombatFeedback"
 		add_child(feedback)
 
+	if get_tree().get_nodes_in_group(CombatFX.GROUP).is_empty():
+		var fx := CombatFX.new()
+		fx.name = "CombatFX"
+		add_child(fx)
+
 	super._ready()

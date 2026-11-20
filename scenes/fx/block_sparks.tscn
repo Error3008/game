@@ -1,0 +1,37 @@
+[gd_scene load_steps=6 format=3]
+
+[sub_resource type="Gradient" id="g"]
+colors = PackedColorArray(0.6, 0.85, 1, 1, 0.2, 0.4, 1, 0)
+
+[sub_resource type="GradientTexture1D" id="gt"]
+gradient = SubResource("g")
+
+[sub_resource type="ParticleProcessMaterial" id="pm"]
+emission_shape = 1
+emission_sphere_radius = 0.05
+direction = Vector3(0, 1, 0)
+spread = 180.0
+initial_velocity_min = 2.0
+initial_velocity_max = 4.0
+gravity = Vector3(0, -9, 0)
+damping_min = 2.0
+damping_max = 4.0
+color_ramp = SubResource("gt")
+
+[sub_resource type="StandardMaterial3D" id="mat"]
+shading_mode = 0
+vertex_color_use_as_albedo = true
+billboard_mode = 1
+
+[sub_resource type="QuadMesh" id="q"]
+material = SubResource("mat")
+size = Vector2(0.06, 0.06)
+
+[node name="block_sparks" type="GPUParticles3D"]
+emitting = false
+amount = 12
+lifetime = 0.3
+one_shot = true
+explosiveness = 1.0
+process_material = SubResource("pm")
+draw_pass_1 = SubResource("q")

@@ -70,7 +70,7 @@ func _calculate_knockback_direction(target_node: Node3D) -> Vector3:
 ## Собирает DamageInfo и отдаёт цели (take_hit, иначе take_damage). false — у цели нет приёмника урона.
 func _deal(receiver: Object, knockback_dir: Vector3) -> bool:
 	if receiver.has_method("take_hit"):
-		receiver.take_hit(_build_damage_info(knockback_dir))
+		receiver.take_hit(_build_damage_info(knockback_dir, receiver as Node3D))
 		return true
 	if receiver.has_method("take_damage"):
 		receiver.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
@@ -89,13 +89,35 @@ func apply_weapon(w: WeaponData) -> void:
 	break_damage = w.break_damage
 
 
-func _build_damage_info(knockback_dir: Vector3) -> DamageInfo:
+func _build_damage_info(knockback_dir: Vector3, target: Node3D = null) -> DamageInfo:
 	var info := DamageInfo.make(damage, knockback_dir * knockback_force, attacker, damage_source, block_stamina_damage)
 	info.damage_type = damage_type
 	info.unblockable = unblockable
 	info.unparryable = unparryable
 	info.break_damage = break_damage
+	if target != null:
+		info.contact_point = _contact_point(target)
+		info.has_contact_point = true
 	return info
+
+
+## Точка, где клинок прошёл ближе всего к оси цели, вынесенная на её переднюю поверхность.
+## Позиция самого хитбокса не годится: это рукоять в ладони атакующего.
+func _contact_point(target: Node3D) -> Vector3:
+	var capsule: CapsuleShape3D = collision_shape.shape as CapsuleShape3D
+	if capsule == null:
+		return global_position
+	var half: float = capsule.height * 0.5
+	var blade_a: Vector3 = collision_shape.global_transform * Vector3(0.0, -half, 0.0)
+	var blade_b: Vector3 = collision_shape.global_transform * Vector3(0.0, half, 0.0)
+	var base: Vector3 = target.global_position
+	var closest: PackedVector3Array = Geometry3D.get_closest_points_between_segments(
+		blade_a, blade_b, base + Vector3.UP * 0.4, base + Vector3.UP * 1.6)
+	var to_attacker: Vector3 = (attacker.global_position if is_instance_valid(attacker) else blade_a) - base
+	to_attacker.y = 0.0
+	if to_attacker.length_squared() < 0.0001:
+		return closest[1]
+	return closest[1] + to_attacker.normalized() * 0.3
 
 
 func _on_body_entered(body: Node3D) -> void:

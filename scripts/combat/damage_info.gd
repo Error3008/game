@@ -21,6 +21,9 @@ var break_damage: float = 0.0
 var block_stamina: float = -1.0
 ## Откуда удар: &"heavy", &"light", &"kick", &"burn", &"direct", позже id приёмов.
 var source: StringName = &"direct"
+## Мировая точка контакта (для FX). Заполняет Hitbox; без неё FX берёт грудь цели.
+var contact_point: Vector3 = Vector3.ZERO
+var has_contact_point: bool = false
 
 
 static func make(p_amount: float, p_knockback: Vector3, p_attacker: Node3D = null, p_source: StringName = &"direct", p_block_stamina: float = -1.0) -> DamageInfo:
