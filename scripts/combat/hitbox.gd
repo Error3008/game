@@ -6,6 +6,8 @@ signal hit_landed(target: Node3D, damage: float)
 @export_group("Combat Stats")
 @export var damage: float = 20.0
 @export var knockback_force: float = 4.0
+## Цена блока этого удара в стамине защитника (из WeaponData). -1 = цена блока по умолчанию.
+@export var block_stamina_damage: float = -1.0
 
 @export_group("Debug")
 @export var debug_visual: bool = true
@@ -68,7 +70,7 @@ func _on_body_entered(body: Node3D) -> void:
 
 	print("[Hitbox] Hit landed on: ", body.name, " (Damage: ", damage, ")")
 	if body.has_method("take_damage"):
-		body.take_damage(damage, knockback_dir * knockback_force, attacker)
+		body.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
 	hit_landed.emit(body, damage)
 
 
@@ -82,7 +84,7 @@ func _on_area_entered(area: Area3D) -> void:
 
 		print("[Hitbox] Hit landed on hurtbox: ", area.name, " belonging to ", owner_node.name)
 		if area.has_method("take_damage"):
-			area.take_damage(damage, knockback_dir * knockback_force, attacker)
+			area.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
 		elif owner_node.has_method("take_damage"):
-			owner_node.take_damage(damage, knockback_dir * knockback_force, attacker)
+			owner_node.take_damage(damage, knockback_dir * knockback_force, attacker, block_stamina_damage)
 		hit_landed.emit(owner_node, damage)

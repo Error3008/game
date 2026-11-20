@@ -13,3 +13,4 @@ active_end_time = 0.42
 total_duration = 0.79
 lunge_speed = 1.2
 stamina_cost = 10.0
+block_stamina_damage = 15.0

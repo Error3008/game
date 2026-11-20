@@ -455,7 +455,8 @@ func cmd_clear_target() -> void:
 
 # --- Combat Physics & Reactions ---
 
-func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D = null) -> void:
+## block_stamina: цена блока этого удара в стамине защитника (WeaponData.block_stamina_damage); -1 = по умолчанию.
+func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3D = null, block_stamina: float = -1.0) -> void:
 	if not is_alive():
 		return
 
@@ -471,7 +472,7 @@ func take_damage(amount: float, knockback_impulse: Vector3, attacker_node: Node3
 
 	# 2. DefenseComponent evaluation (Block, Parry, Penalty, Backstab check)
 	if is_instance_valid(defense_component):
-		var eval := defense_component.evaluate_hit(amount, knockback_impulse, attacker_node)
+		var eval := defense_component.evaluate_hit(amount, knockback_impulse, attacker_node, block_stamina)
 		if eval["was_parried"]:
 			var att_name := String(attacker_node.name) if is_instance_valid(attacker_node) else "Attacker"
 			print("[%s] PERFECT PARRY against %s! Negated %.1f damage with 0 knockback." % [name, att_name, amount])

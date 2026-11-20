@@ -17,3 +17,6 @@ extends Resource
 
 @export_group("Stamina")
 @export var stamina_cost: float = 20.0
+## Сколько стамины у защитника отнимает блок этого удара (до скидок билда). 35 = базовая цена блока.
+## Скидка брони пропорциональна: цена = stat(defense.block_stamina_cost) × block_stamina_damage / 35.
+@export var block_stamina_damage: float = 35.0

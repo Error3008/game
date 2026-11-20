@@ -193,7 +193,8 @@ func can_block_from(attacker: Node3D) -> bool:
 	return facing.dot(to_attacker) >= block_angle_threshold
 
 
-func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictionary:
+## block_stamina: цена блока именно этого удара (WeaponData.block_stamina_damage), -1 = базовая цена блока.
+func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D, block_stamina: float = -1.0) -> Dictionary:
 	var result := {
 		"handled": false,
 		"damage_taken": amount,
@@ -246,7 +247,7 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 			var stam: StaminaComponent = actor.stamina_component
 			var s := _stats()
 			var sb: StatBlock = actor.get("stat_block")
-			stam.consume(sb.get_value(StatKeys.BLOCK_STAMINA_COST) if sb != null else (s.block_impact_stamina_cost if s != null else 0.0))
+			stam.consume(_block_stamina_cost(block_stamina, sb, s))
 			if stam.current_stamina <= 0.0:
 				result["was_guard_broken"] = true
 				end_block()
@@ -265,6 +266,15 @@ func evaluate_hit(amount: float, knockback: Vector3, attacker: Node3D) -> Dictio
 		result["was_penalty"] = true
 
 	return result
+
+
+## Цена блока удара: билд-цена блока (stat) × (цена удара / базовая цена блока).
+func _block_stamina_cost(hit_cost: float, sb: StatBlock, s: CharacterStats) -> float:
+	var base_cost: float = s.block_impact_stamina_cost if s != null else 0.0
+	var cost: float = sb.get_value(StatKeys.BLOCK_STAMINA_COST) if sb != null else base_cost
+	if hit_cost >= 0.0 and base_cost > 0.0:
+		cost *= hit_cost / base_cost
+	return cost
 
 
 func _update_debug_visual() -> void:

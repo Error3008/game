@@ -32,7 +32,6 @@ extends Resource
 @export_range(0.0, 1.0) var block_regen_multiplier: float = 0.25
 @export var block_impact_stamina_cost: float = 35.0
 @export var parry_bonus_stamina: float = 15.0
-@export var parry_attempt_stamina_cost: float = 0.0
 @export var guard_break_stagger_duration: float = 1.5
 
 @export_group("Build")

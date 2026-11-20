@@ -66,6 +66,7 @@ func _setup_weapon_hitbox() -> void:
 		weapon_hitbox.attacker = actor
 		weapon_hitbox.damage = weapon_data.damage
 		weapon_hitbox.knockback_force = weapon_data.knockback_force
+		weapon_hitbox.block_stamina_damage = weapon_data.block_stamina_damage
 		weapon_hitbox.collision_mask = target_collision_mask
 		weapon_node.add_child(weapon_hitbox)
 
@@ -126,6 +127,7 @@ func process_attack(delta: float) -> void:
 		if is_instance_valid(weapon_hitbox) and not weapon_hitbox.is_active:
 			weapon_hitbox.damage = weapon_data.damage
 			weapon_hitbox.knockback_force = weapon_data.knockback_force
+			weapon_hitbox.block_stamina_damage = weapon_data.block_stamina_damage
 			weapon_hitbox.set_active(true)
 			attack_hitbox_opened.emit()
 

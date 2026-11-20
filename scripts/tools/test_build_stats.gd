@@ -202,5 +202,44 @@ func _run_tests() -> void:
 	dfn.end_block()
 	print(">> TEST 10 PASSED")
 
+	# ---------- TEST 11: цена блока зависит от удара (WeaponData.block_stamina_damage) ----------
+	print("\n[TEST 11] per-hit block stamina cost")
+	assert(_near((load("res://resources/weapons/greatsword.tres") as WeaponData).block_stamina_damage, 35.0), "player heavy block cost 35")
+	assert(_near((load("res://resources/weapons/enemy_sword.tres") as WeaponData).block_stamina_damage, 35.0), "enemy heavy block cost 35")
+	assert(_near((load("res://resources/weapons/greatsword_light.tres") as WeaponData).block_stamina_damage, 15.0), "player light block cost 15")
+	assert(_near((load("res://resources/weapons/enemy_sword_light.tres") as WeaponData).block_stamina_damage, 15.0), "enemy light block cost 15")
+	var hb: Hitbox = armored.attack_component.weapon_hitbox
+	assert(hb != null and _near(hb.block_stamina_damage, armored.attack_component.weapon_data.block_stamina_damage), "hitbox takes block cost from weapon data")
+	# armored: stat цена блока 19 (база 35). Heavy 35 -> 19, light 15 -> 19 * 15 / 35, без значения -> 19
+	var costs: Dictionary = {35.0: 19.0, 15.0: 19.0 * 15.0 / 35.0, -1.0: 19.0}
+	for hit_cost: float in costs:
+		dfn.end_block()
+		armored.stamina_component.current_stamina = armored.stamina_component.max_stamina
+		assert(dfn.start_block(), "armored raises guard (hit cost %.0f)" % hit_cost)
+		var before: float = armored.stamina_component.current_stamina
+		var r: Dictionary = dfn.evaluate_hit(20.0, Vector3.ZERO, null, hit_cost)
+		assert(r["was_blocked"], "hit is blocked (hit cost %.0f)" % hit_cost)
+		var spent: float = before - armored.stamina_component.current_stamina
+		assert(_near(spent, costs[hit_cost]), "hit cost %.0f -> spent %.3f, expected %.3f" % [hit_cost, spent, costs[hit_cost]])
+	# Нейтральный билд: лёгкий удар 15, тяжёлый 35
+	var neutral_dfn: DefenseComponent = player.defense_component
+	for hit_cost: float in [35.0, 15.0]:
+		neutral_dfn.end_block()
+		player.stamina_component.current_stamina = player.stamina_component.max_stamina
+		assert(neutral_dfn.start_block(), "player raises guard")
+		var before_n: float = player.stamina_component.current_stamina
+		neutral_dfn.evaluate_hit(20.0, Vector3.ZERO, null, hit_cost)
+		assert(_near(before_n - player.stamina_component.current_stamina, hit_cost), "neutral build pays exactly %.0f" % hit_cost)
+	# Сквозная цепочка take_damage -> evaluate_hit: цена блока передаётся 4-м аргументом
+	neutral_dfn.end_block()
+	player.stamina_component.current_stamina = player.stamina_component.max_stamina
+	assert(neutral_dfn.start_block(), "player raises guard for take_damage check")
+	var before_t: float = player.stamina_component.current_stamina
+	player.take_damage(1.0, Vector3.ZERO, null, 15.0)
+	assert(_near(before_t - player.stamina_component.current_stamina, 15.0), "take_damage passes block cost to DefenseComponent")
+	neutral_dfn.end_block()
+	dfn.end_block()
+	print(">> TEST 11 PASSED")
+
 	print("\nALL BUILD STATS TESTS PASSED 100%!")
 	quit()
