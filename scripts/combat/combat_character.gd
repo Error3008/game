@@ -172,6 +172,16 @@ func stat(key: StringName) -> float:
 	return stat_block.get_value(key)
 
 
+## Итоговый множитель входящего урона типа: damage.taken (все типы) × damage.taken_physical (только физический).
+## Произведение зажато в те же границы, что и каждый ключ, поэтому броня вместе с ловкостью не пробивает потолок.
+func damage_multiplier(type: DamageInfo.DamageType) -> float:
+	var mult: float = stat(StatKeys.DAMAGE_TAKEN)
+	if type == DamageInfo.DamageType.PHYSICAL:
+		mult *= stat(StatKeys.DAMAGE_TAKEN_PHYSICAL)
+	var b: Vector2 = StatKeys.BOUNDS[StatKeys.DAMAGE_TAKEN]
+	return clampf(mult, b.x, b.y)
+
+
 ## Скорость движения по ключу с общим множителем move.speed.
 ## StatBlock.get_value кэширует итог, так что вызов дешёвый (2 чтения из словаря).
 func move_speed(key: StringName) -> float:
@@ -187,6 +197,7 @@ func _register_actor_stat_bases() -> void:
 	stat_block.set_base(StatKeys.MOVE_COMBAT_WALK, stats.combat_walk_speed)
 	stat_block.set_base(StatKeys.MOVE_COMBAT_STRAFE, stats.combat_strafe_speed)
 	stat_block.set_base(StatKeys.DAMAGE_TAKEN, 1.0)
+	stat_block.set_base(StatKeys.DAMAGE_TAKEN_PHYSICAL, 1.0)
 	stat_block.set_base(StatKeys.HEALTH_MAX, stats.max_health)
 
 
@@ -513,8 +524,8 @@ func take_hit(info: DamageInfo) -> Dictionary:
 
 	result["was_blocked"] = was_blocked
 
-	# 2б. Множитель входящего урона от билда (броня/ловкость): после блока, до здоровья
-	final_damage *= stat(StatKeys.DAMAGE_TAKEN)
+	# 2б. Множитель входящего урона от билда (броня только против физического, ловкость против любого): после блока, до здоровья
+	final_damage *= damage_multiplier(info.damage_type)
 	result["final_damage"] = final_damage
 
 	# 3. Apply damage to HealthComponent

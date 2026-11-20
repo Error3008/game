@@ -55,6 +55,7 @@ func _run_tests() -> void:
 	var ab := StatBlock.new()
 	ab.set_base(StatKeys.DASH_SPEED, 8.5)
 	ab.set_base(StatKeys.DAMAGE_TAKEN, 1.0)
+	ab.set_base(StatKeys.DAMAGE_TAKEN_PHYSICAL, 1.0)
 	ab.set_base(StatKeys.ATTACK_SPEED, 1.0)
 	ab.set_base(StatKeys.DASH_COOLDOWN, 0.55)
 	ab.set_base(StatKeys.PARRY_WINDOW, 0.2)
@@ -65,18 +66,20 @@ func _run_tests() -> void:
 	rules.apply(ab, 0, 8)
 	rules.apply(ab, 0, 8)  # повторный вызов не должен дублировать бонусы
 	assert(_near(ab.get_value(StatKeys.DASH_SPEED), 10.54), "agility 8 dash.speed 8.5 -> 10.54, got %f" % ab.get_value(StatKeys.DASH_SPEED))
+	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN_PHYSICAL), 1.0), "agility does not touch damage.taken_physical")
 	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 1.16), "agility 8 damage.taken 1.0 -> 1.16, got %f" % ab.get_value(StatKeys.DAMAGE_TAKEN))
 	assert(_near(ab.get_value(StatKeys.ATTACK_SPEED), 1.24), "agility 8 attack.speed 1.24")
 	assert(_near(ab.get_value(StatKeys.DASH_COOLDOWN), 0.39), "agility 8 dash.cooldown 0.39")
 	rules.apply(ab, 8, 0)  # пересчёт: агильность снимается, броня добавляется
 	assert(_near(ab.get_value(StatKeys.DASH_SPEED), 8.5), "armor-only build: dash unchanged")
-	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 0.68), "armor 8 damage.taken 0.68")
+	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN_PHYSICAL), 0.68), "armor 8 damage.taken_physical 0.68")
+	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 1.0), "armor does not touch damage.taken")
 	assert(_near(ab.get_value(StatKeys.PARRY_WINDOW), 0.32), "armor 8 parry window 0.32")
 	assert(_near(ab.get_value(StatKeys.BLOCK_STAMINA_COST), 19.0), "armor 8 block cost 19")
 	rules.apply(ab, 0, 0)
-	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 1.0) and _near(ab.get_value(StatKeys.DASH_SPEED), 8.5), "zero build = neutral")
+	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 1.0) and _near(ab.get_value(StatKeys.DAMAGE_TAKEN_PHYSICAL), 1.0) and _near(ab.get_value(StatKeys.DASH_SPEED), 8.5), "zero build = neutral")
 	rules.apply(ab, 10, 0)
-	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN), 0.6), "armor 10 hits damage floor 0.6")
+	assert(_near(ab.get_value(StatKeys.DAMAGE_TAKEN_PHYSICAL), 0.6), "armor 10 hits physical floor 0.6")
 	ab.free()
 	print(">> TEST 2 PASSED")
 
@@ -98,16 +101,27 @@ func _run_tests() -> void:
 			assert(actor.stat_block.has_base(k), "%s missing base for %s" % [actor.name, k])
 	assert(_near(player.stat(StatKeys.DAMAGE_TAKEN), 1.0), "player neutral")
 	assert(_near(neutral.stat(StatKeys.DAMAGE_TAKEN), 1.0), "left-wall dummy neutral")
-	assert(_near(armored.stat(StatKeys.DAMAGE_TAKEN), 1.0 - 0.04 * 8 + 0.02 * 1), "armored preset damage.taken")
+	assert(_near(armored.stat(StatKeys.DAMAGE_TAKEN), 1.0 + 0.02 * 1) and _near(armored.stat(StatKeys.DAMAGE_TAKEN_PHYSICAL), 1.0 - 0.04 * 8), "armored preset damage.taken / taken_physical")
 	assert(_near(agile.stat(StatKeys.DASH_SPEED), 8.5 * (1.0 + 0.03 * 8)), "agile preset dash.speed")
-	assert(_near(balanced.stat(StatKeys.DAMAGE_TAKEN), 1.0 - 0.04 * 4 + 0.02 * 4), "balanced preset damage.taken")
+	assert(_near(balanced.stat(StatKeys.DAMAGE_TAKEN), 1.0 + 0.02 * 4) and _near(balanced.stat(StatKeys.DAMAGE_TAKEN_PHYSICAL), 1.0 - 0.04 * 4), "balanced preset damage.taken / taken_physical")
 	print(">> TEST 3 PASSED")
 
 	# ---------- TEST 4: входящий урон через take_damage ----------
-	print("\n[TEST 4] take_damage uses damage.taken")
+	print("\n[TEST 4] take_hit: armor only vs physical")
 	var hp_a: float = armored.health_component.current_health
 	armored.take_damage(20.0, Vector3.ZERO, player)
-	assert(_near(hp_a - armored.health_component.current_health, 20.0 * armored.stat(StatKeys.DAMAGE_TAKEN)), "armored damage scaled")
+	# броня 8, ловкость 1: физический ×1.02 × 0.68, магический только ×1.02
+	var phys_mult: float = 1.02 * 0.68
+	assert(_near(armored.damage_multiplier(DamageInfo.DamageType.PHYSICAL), phys_mult), "armored physical multiplier")
+	assert(_near(armored.damage_multiplier(DamageInfo.DamageType.MAGIC), 1.02), "armored magic multiplier ignores armor")
+	assert(_near(hp_a - armored.health_component.current_health, 20.0 * phys_mult), "armored physical damage scaled")
+	var hp_m: float = armored.health_component.current_health
+	var magic := DamageInfo.make(20.0, Vector3.ZERO, player)
+	magic.damage_type = DamageInfo.DamageType.MAGIC
+	var mres: Dictionary = armored.take_hit(magic)
+	assert(_near(hp_m - armored.health_component.current_health, 20.0 * 1.02) and _near(mres["final_damage"], 20.0 * 1.02), "armored takes magic without armor")
+	var bal_phys: float = balanced.damage_multiplier(DamageInfo.DamageType.PHYSICAL)
+	assert(_near(bal_phys, 1.08 * 0.84), "balanced physical multiplier")
 	var hp_n: float = neutral.health_component.current_health
 	neutral.take_damage(20.0, Vector3.ZERO, player)
 	assert(_near(hp_n - neutral.health_component.current_health, 20.0), "neutral damage unscaled")

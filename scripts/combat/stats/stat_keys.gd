@@ -18,6 +18,7 @@ const DASH_STAMINA_COST: StringName = &"dash.stamina_cost"      # стамина
 const PARRY_WINDOW: StringName = &"defense.parry_window"        # с
 const BLOCK_STAMINA_COST: StringName = &"defense.block_stamina_cost"  # стамина
 const DAMAGE_TAKEN: StringName = &"damage.taken"                # множитель входящего урона
+const DAMAGE_TAKEN_PHYSICAL: StringName = &"damage.taken_physical"  # множитель входящего физического урона (броня)
 const STAMINA_MAX: StringName = &"stamina.max"
 const STAMINA_REGEN: StringName = &"stamina.regen"             # стамина/с
 const HEALTH_MAX: StringName = &"health.max"
@@ -40,6 +41,7 @@ const BOUNDS: Dictionary = {
 	PARRY_WINDOW: Vector2(0.1, 0.4),
 	BLOCK_STAMINA_COST: Vector2(5.0, 60.0),
 	DAMAGE_TAKEN: Vector2(0.6, 1.5),
+	DAMAGE_TAKEN_PHYSICAL: Vector2(0.6, 1.5),
 	STAMINA_MAX: Vector2(50.0, 200.0),
 	STAMINA_REGEN: Vector2(5.0, 60.0),
 	HEALTH_MAX: Vector2(50.0, 300.0),

@@ -7,7 +7,7 @@ extends Resource
 const SOURCE: StringName = &"attributes"
 
 @export_group("Armor (за уровень)")
-@export var armor_damage_taken: float = -0.04      # PERCENT: входящий урон
+@export var armor_damage_taken: float = -0.04      # PERCENT: входящий физический урон (damage.taken_physical)
 @export var armor_parry_window: float = 0.015      # FLAT, с: окно парирования
 @export var armor_block_stamina_cost: float = -2.0 # FLAT: цена блока в стамине
 @export var armor_move_speed: float = -0.02        # PERCENT: цена брони — все скорости
@@ -33,7 +33,8 @@ func apply(block: StatBlock, armor: int, agility: int) -> void:
 
 	# (ключ, операция) -> суммарное значение
 	var sums: Dictionary = {}
-	_add(sums, StatKeys.DAMAGE_TAKEN, P, armor_damage_taken * a + agility_damage_taken * g)
+	_add(sums, StatKeys.DAMAGE_TAKEN_PHYSICAL, P, armor_damage_taken * a)
+	_add(sums, StatKeys.DAMAGE_TAKEN, P, agility_damage_taken * g)
 	_add(sums, StatKeys.PARRY_WINDOW, F, armor_parry_window * a)
 	_add(sums, StatKeys.BLOCK_STAMINA_COST, F, armor_block_stamina_cost * a)
 	_add(sums, StatKeys.MOVE_SPEED, P, armor_move_speed * a)
