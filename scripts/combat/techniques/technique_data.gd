@@ -19,8 +19,14 @@ enum Kind {
 ## id школы (`onslaught`, `stance`, `tricks`).
 @export var school: StringName = &""
 @export var kind: Kind = Kind.ATTACK_VARIANT
-## Как вызывается: контекстно (`heavy_hold`, `light_chain`, ...) или слотом (`slot`). Правила ввода — задача 1.7.
-@export var trigger: StringName = &"slot"
+## Как вызывается: TRIGGER_SLOT — клавиши 1–4, остальные — контекстно (PlayerController).
+const TRIGGER_SLOT: StringName = &"slot"
+const TRIGGER_HEAVY_HOLD: StringName = &"heavy_hold"   # удержание атаки (Напролом)
+const TRIGGER_LIGHT_CHAIN: StringName = &"light_chain" # лёгкая в буфере (Серия)
+const TRIGGER_BLOCK_FEINT: StringName = &"block_feint" # блок в замахе тяжёлой (Финт)
+const TRIGGER_AFTER_PARRY: StringName = &"after_parry" # атака после парирования (Контрудар)
+const TRIGGER_BLOCK_KICK: StringName = &"block_kick"   # пинок в блоке (Отбив)
+@export var trigger: StringName = TRIGGER_SLOT
 ## Удары приёма. Для ATTACK_VARIANT берётся первый; стамину за него списывает сам удар (WeaponData.stamina_cost).
 @export var attacks: Array[WeaponData] = []
 ## Стамина приёма. Для ATTACK_VARIANT не используется (цена в WeaponData).

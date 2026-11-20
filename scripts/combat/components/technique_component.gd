@@ -12,6 +12,9 @@ var actor: CombatCharacter3D = null
 var equipped: Dictionary = {}
 ## id -> оставшийся откат, с
 var cooldowns: Dictionary = {}
+## Слоты самостоятельных приёмов (клавиши 1–4): id или пустой StringName.
+const SLOT_COUNT: int = 4
+var slots: Array[StringName] = [&"", &"", &"", &""]
 var _handler: TechniqueHandler = null
 
 
@@ -26,6 +29,31 @@ func equip(data: TechniqueData) -> void:
 
 func unequip(id: StringName) -> void:
 	equipped.erase(id)
+	for i in SLOT_COUNT:
+		if slots[i] == id:
+			slots[i] = &""
+
+
+## Привязывает экипированный приём к слоту (0..3); пустой id очищает слот.
+func bind_slot(index: int, id: StringName) -> bool:
+	if index < 0 or index >= SLOT_COUNT or (id != &"" and not equipped.has(id)):
+		return false
+	slots[index] = id
+	return true
+
+
+func use_slot(index: int) -> bool:
+	if index < 0 or index >= SLOT_COUNT or slots[index] == &"":
+		return false
+	return actor.cmd_technique(slots[index])
+
+
+## Экипированный приём с данным триггером (контекстный вызов) или null.
+func find_by_trigger(trigger: StringName) -> TechniqueData:
+	for data: TechniqueData in equipped.values():
+		if data.trigger == trigger:
+			return data
+	return null
 
 
 func is_equipped(id: StringName) -> bool:

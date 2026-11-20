@@ -14,6 +14,10 @@ var is_lock_enabled: bool = false
 ## ЛКМ/F: тап короче порога = лёгкая атака, удержание дольше порога = тяжёлая.
 @export var heavy_hold_threshold: float = 0.22
 
+## Окно буфера ввода: нажатие чуть раньше, чем действие стало возможным, не теряется.
+@export var input_buffer_window: float = 0.2
+
+var _buffer: InputBuffer = InputBuffer.new()
 var _attack_held: bool = false
 var _attack_hold_time: float = 0.0
 
@@ -24,6 +28,7 @@ func _ready() -> void:
 		push_error("[PlayerController] Parent node must be a CombatCharacter3D!")
 		return
 
+	_buffer.window = input_buffer_window
 	spring_arm_pivot = actor.get_node_or_null("SpringArmPivot") as Node3D
 	actor.character_died.connect(_on_actor_died)
 
@@ -59,6 +64,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_attack_held = false
 		_try_attack(true)
 
+	for i in TechniqueComponent.SLOT_COUNT:
+		if event.is_action_pressed("technique_%d" % (i + 1)):
+			if not actor.technique_component.use_slot(i):
+				_buffer.push(StringName("technique_%d" % (i + 1)), _now())
+
 	if event.is_action_pressed("heal"):
 		actor.cmd_heal()
 
@@ -92,6 +102,8 @@ func _physics_process(_delta: float) -> void:
 		return
 
 	_update_target_lock()
+
+	_consume_buffered()
 
 	# Удержание атаки дольше порога -> тяжёлая
 	if _attack_held:
@@ -130,11 +142,39 @@ func _try_attack(light: bool) -> void:
 	if not is_instance_valid(actor.current_target):
 		return
 	if actor.is_attacking or actor.is_dashing:
+		if light:
+			_buffer.push(&"attack_light", _now())
 		return
 	if light:
 		actor.cmd_attack_light()
-	else:
+	elif not _try_contextual(TechniqueData.TRIGGER_HEAVY_HOLD):
 		actor.cmd_attack()
+
+
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## Контекстный вызов: если экипирован приём с этим триггером и он стартовал — true,
+## иначе вызывающий выполняет обычное действие.
+func _try_contextual(trigger: StringName) -> bool:
+	var data: TechniqueData = actor.technique_component.find_by_trigger(trigger)
+	return data != null and actor.cmd_technique(data.id)
+
+
+## Повтор отложенных нажатий, когда актор освободился.
+func _consume_buffered() -> void:
+	if actor.is_staggered or actor.is_attacking or actor.is_dashing or actor.is_kicking or actor.is_healing:
+		return
+	var now := _now()
+	if is_instance_valid(actor.current_target) and not actor.is_blocking() and _buffer.consume(&"attack_light", now):
+		actor.cmd_attack_light()
+		return
+	for i in TechniqueComponent.SLOT_COUNT:
+		var key := StringName("technique_%d" % (i + 1))
+		if _buffer.has(key, now) and actor.technique_component.use_slot(i):
+			_buffer.consume(key, now)
+			return
 
 
 func _trigger_directional_dash() -> void:
