@@ -47,6 +47,8 @@ var dash_component: DashComponent = null
 var stamina_component: StaminaComponent = null
 var kick_component: KickComponent = null
 var heal_component: HealComponent = null
+var focus_component: FocusComponent = null
+var technique_component: TechniqueComponent = null
 
 # Target & Combat State
 var current_target: Node3D = null
@@ -81,6 +83,11 @@ var is_kicking: bool:
 var is_healing: bool:
 	get:
 		return heal_component.is_healing if is_instance_valid(heal_component) else false
+
+## Приём держит актора на месте (приём-удар идёт как обычная атака и сюда не входит).
+var is_using_technique: bool:
+	get:
+		return technique_component.is_busy() if is_instance_valid(technique_component) else false
 
 var is_dashing: bool:
 	get:
@@ -170,6 +177,20 @@ func _discover_and_setup_components() -> void:
 	heal_component.setup(self)
 	heal_component.init_from_stats(stats)
 
+	focus_component = get_node_or_null("FocusComponent") as FocusComponent
+	if not is_instance_valid(focus_component):
+		focus_component = FocusComponent.new()
+		focus_component.name = "FocusComponent"
+		add_child(focus_component)
+	focus_component.setup(self)
+
+	technique_component = get_node_or_null("TechniqueComponent") as TechniqueComponent
+	if not is_instance_valid(technique_component):
+		technique_component = TechniqueComponent.new()
+		technique_component.name = "TechniqueComponent"
+		add_child(technique_component)
+	technique_component.setup(self)
+
 	# Базы уже зарегистрированы компонентами — теперь накладываем билд.
 	apply_build()
 
@@ -237,6 +258,11 @@ func _physics_process(delta: float) -> void:
 	if is_instance_valid(stamina_component):
 		stamina_component.update(delta)
 
+	if is_instance_valid(focus_component):
+		focus_component.update(delta)
+	if is_instance_valid(technique_component):
+		technique_component.update(delta)
+
 	# Always tick dash component (cooldown countdown + active dash movement)
 	if is_instance_valid(dash_component):
 		dash_component.update(delta)
@@ -287,6 +313,13 @@ func _physics_process(delta: float) -> void:
 		velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
 		velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
 
+	# 3.7. Приём без собственного удара: стоим на месте, пока он идёт
+	elif is_using_technique:
+		target_combat_mode = 1.0
+		target_combat_movement = Vector2.ZERO
+		velocity.x = lerp(velocity.x, 0.0, stats.decel * delta)
+		velocity.z = lerp(velocity.z, 0.0, stats.decel * delta)
+
 	# 4. Process defense component
 	elif is_blocking() and is_instance_valid(defense_component):
 		defense_component.process_defense(delta)
@@ -324,7 +357,7 @@ func _physics_process(delta: float) -> void:
 # --- Command Interface (API for Controllers) ---
 
 func cmd_move(world_dir: Vector3, is_running: bool) -> void:
-	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_using_technique or is_blocking():
 		return
 
 	target_combat_mode = 0.0
@@ -341,7 +374,7 @@ func cmd_move(world_dir: Vector3, is_running: bool) -> void:
 
 
 func cmd_combat_move(lateral: float, forward: float, speed_override: float = -1.0) -> void:
-	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_blocking():
+	if is_staggered or is_attacking or is_dashing or is_kicking or is_healing or is_using_technique or is_blocking():
 		return
 
 	target_combat_mode = 1.0
@@ -392,7 +425,7 @@ func cmd_attack_light() -> bool:
 
 
 func _start_attack(light: bool) -> bool:
-	if is_staggered or is_dashing or is_kicking or is_healing:
+	if is_staggered or is_dashing or is_kicking or is_healing or is_using_technique:
 		return false
 	if is_blocking():
 		return cmd_parry()
@@ -406,8 +439,21 @@ func _start_attack(light: bool) -> bool:
 	return false
 
 
+## Запуск приёма по id. Условия (экипирован, откат, цена, запреты) проверяет TechniqueComponent.
+func cmd_technique(id: StringName) -> bool:
+	if not is_instance_valid(technique_component):
+		return false
+	var data: TechniqueData = technique_component.equipped.get(id)
+	target_combat_movement = Vector2.ZERO
+	target_combat_mode = 1.0
+	var started := technique_component.start(id)
+	if started:
+		action_started.emit(&"technique", data)
+	return started
+
+
 func cmd_heal() -> bool:
-	if is_staggered or is_dashing or is_attacking or is_kicking or is_blocking() or not is_instance_valid(heal_component):
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_using_technique or is_blocking() or not is_instance_valid(heal_component):
 		return false
 	target_combat_movement = Vector2.ZERO
 	var started := heal_component.start_heal()
@@ -417,7 +463,7 @@ func cmd_heal() -> bool:
 
 
 func cmd_kick() -> bool:
-	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing:
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing or is_using_technique:
 		return false
 	if is_blocking():
 		return false
@@ -432,7 +478,7 @@ func cmd_kick() -> bool:
 
 
 func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
-	if is_staggered or is_dashing or is_healing or not is_instance_valid(dash_component):
+	if is_staggered or is_dashing or is_healing or is_using_technique or not is_instance_valid(dash_component):
 		return false
 
 	# Cannot dash while blocking or holding guard
@@ -460,7 +506,7 @@ func cmd_dash(chosen_dir: DashComponent.DashDirection) -> bool:
 
 
 func cmd_block_start() -> bool:
-	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing or not is_instance_valid(defense_component):
+	if is_staggered or is_dashing or is_attacking or is_kicking or is_healing or is_using_technique or not is_instance_valid(defense_component):
 		return false
 	var started := defense_component.start_block()
 	if started:
@@ -618,6 +664,8 @@ func stagger(duration: float = 0.8, from_node: Node3D = null) -> void:
 
 ## Отменяет всё текущее действие (атака, пинок, дэш, лечение, блок).
 func _cancel_all_actions() -> void:
+	if is_instance_valid(technique_component):
+		technique_component.cancel()
 	if is_attacking and is_instance_valid(attack_component):
 		attack_component.cancel_attack()
 	if is_kicking and is_instance_valid(kick_component):
@@ -666,6 +714,8 @@ func restore_full() -> void:
 	velocity = Vector3.ZERO
 	health_component.init_health(health_component.max_health)
 	stamina_component.restore(stamina_component.max_stamina)
+	focus_component.restore_full()
+	technique_component.reset()
 	heal_component.init_from_stats(stats)
 
 

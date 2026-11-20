@@ -77,11 +77,14 @@ func _setup_weapon_hitbox() -> void:
 		weapon_node.add_child(weapon_hitbox)
 
 
-func start_attack(light: bool = false) -> bool:
+## override — оружие приёма (TechniqueData.attacks); null = обычная лёгкая/тяжёлая.
+func start_attack(light: bool = false, override: WeaponData = null) -> bool:
 	if is_attacking:
 		return false
 
-	if light and is_instance_valid(light_weapon_data):
+	if is_instance_valid(override):
+		weapon_data = override
+	elif light and is_instance_valid(light_weapon_data):
 		weapon_data = light_weapon_data
 	elif is_instance_valid(heavy_weapon_data):
 		weapon_data = heavy_weapon_data

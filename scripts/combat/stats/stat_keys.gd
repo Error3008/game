@@ -22,6 +22,8 @@ const DAMAGE_TAKEN_PHYSICAL: StringName = &"damage.taken_physical"  # множи
 const STAMINA_MAX: StringName = &"stamina.max"
 const STAMINA_REGEN: StringName = &"stamina.regen"             # стамина/с
 const HEALTH_MAX: StringName = &"health.max"
+const FOCUS_MAX: StringName = &"focus.max"                    # запал; 0 = у воина нет запала
+const FOCUS_REGEN: StringName = &"focus.regen"                # запал/с
 
 ## key -> Vector2(min, max). Clamp применяется в StatBlock.get_value().
 const BOUNDS: Dictionary = {
@@ -45,6 +47,8 @@ const BOUNDS: Dictionary = {
 	STAMINA_MAX: Vector2(50.0, 200.0),
 	STAMINA_REGEN: Vector2(5.0, 60.0),
 	HEALTH_MAX: Vector2(50.0, 300.0),
+	FOCUS_MAX: Vector2(0.0, 200.0),
+	FOCUS_REGEN: Vector2(0.0, 30.0),
 }
 
 
