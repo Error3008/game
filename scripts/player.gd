@@ -55,4 +55,9 @@ func _ready() -> void:
 		game_over.name = "GameOverScreen"
 		add_child(game_over)
 
+	if get_tree().get_nodes_in_group(CombatFeedback.GROUP).is_empty():
+		var feedback := CombatFeedback.new()
+		feedback.name = "CombatFeedback"
+		add_child(feedback)
+
 	super._ready()
