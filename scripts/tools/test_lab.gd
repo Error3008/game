@@ -107,5 +107,41 @@ func _run() -> void:
 	assert(d != null and d.is_dummy, "Dummy cell enemy is a dummy")
 	print(">> TEST 5 PASSED")
 
+	# --- Test 6: клетка «Приёмы»: лоадаут игроку, манекен исполняет выбранный приём по кругу ---
+	var drill_cell: DuelCell = lab.get_node("Cell_Приёмы") as DuelCell
+	assert(drill_cell != null and drill_cell.technique_drill, "Technique cell exists")
+	drill_cell.respawn()
+	await _wait_physics(2)
+	var drill: TechniqueDrill = drill_cell.drill
+	var dd: Enemy = drill_cell.get_node("Enemy_Приёмы") as Enemy
+	assert(drill != null and dd != null and dd.is_dummy, "Drill and dummy created")
+	assert(drill.actor == dd, "Drill drives the dummy")
+	# Подставляем два приёма (пока в resources/techniques пусто).
+	var t1 := TechniqueData.new()
+	t1.id = &"drill_a"
+	t1.kind = TechniqueData.Kind.BUFF
+	t1.duration = 0.3
+	var t2 := TechniqueData.new()
+	t2.id = &"drill_b"
+	t2.kind = TechniqueData.Kind.BUFF
+	t2.duration = 0.3
+	var list: Array[TechniqueData] = [t1, t2]
+	drill.techniques = list
+	drill.index = 0
+	TechniqueLoadout.give(dd, list)
+	drill_cell.arm_player(player)
+	assert(player.technique_component.slots[0] == &"drill_a" and player.technique_component.slots[1] == &"drill_b", "Player got slots 1-2")
+	assert(dd.technique_component.is_equipped(&"drill_a"), "Dummy equipped")
+	drill._timer = 0.0
+	await _wait_physics(2)
+	assert(dd.technique_component.current() == t1, "Dummy performs the selected technique")
+	drill.select(1)
+	assert(drill.current() == t2, "Select next")
+	drill.select(1)
+	assert(drill.current() == t1, "Selection wraps")
+	drill.select(-1)
+	assert(drill.current() == t2, "Select previous wraps")
+	print(">> TEST 6 PASSED")
+
 	print("ALL TEST LAB TESTS PASSED 100%!")
 	quit()

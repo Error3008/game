@@ -106,6 +106,7 @@ func _teleport() -> void:
 		player.controller.release_lock()
 	if target_cell != null:
 		target_cell.respawn()
+		target_cell.arm_player(player)
 	player.restore_full()
 	player.global_position = destination.global_position
 	player.velocity = Vector3.ZERO

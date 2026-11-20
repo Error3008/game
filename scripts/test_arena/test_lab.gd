@@ -11,7 +11,7 @@ const HUB_PORTAL_RADIUS: float = 9.0
 const HUB_ARRIVAL_RADIUS: float = 5.5
 const CELL_RING_RADIUS: float = 45.0
 const CELL_SIZE: Vector2 = Vector2(24.0, 24.0)
-const SLOTS: int = 8 # 7 клеток + выход на арену
+const SLOTS: int = 9 # 8 клеток + выход на арену
 ## Портал на арене: подальше от врагов арены (их зона обнаружения 12 м).
 const ARENA_PORTAL_POS: Vector3 = Vector3(0.0, 0.0, 10.0)
 const ARENA_ARRIVAL_POS: Vector3 = Vector3(0.0, 0.05, 5.5)
@@ -41,6 +41,8 @@ const CELLS: Array[Dictionary] = [
 		"hint": "броня + трус/защита", "color": Color(0.5, 0.9, 0.9)},
 	{"name": "Duelist", "stats": BUILD_BALANCED, "personality": PERS_DUELIST, "dummy": false,
 		"hint": "баланс + рациональный", "color": Color(0.85, 0.6, 1.0)},
+	{"name": "Приёмы", "stats": "", "personality": "", "dummy": true, "drill": true,
+		"hint": "манекен повторяет приём, переключение , и .", "color": Color(1.0, 0.65, 0.2)},
 ]
 
 var _grid_material: Material = null
@@ -75,6 +77,7 @@ func _build_cell(i: int, hub_center: Vector3, _arena_arrival: Marker3D) -> void:
 	cell.name = "Cell_%s" % def["name"]
 	cell.cell_name = def["name"]
 	cell.is_dummy = def["dummy"]
+	cell.technique_drill = def.get("drill", false)
 	if def["stats"] != "":
 		cell.enemy_stats = load(def["stats"]) as CharacterStats
 	if def["personality"] != "":

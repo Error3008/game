@@ -14,9 +14,12 @@ const BACK_PORTAL_Z: float = 9.0
 @export var personality: AIPersonality = null
 ## Манекен: стоит, не уклоняется, не бьёт (для разглядывания анимаций и ударов).
 @export var is_dummy: bool = false
+## Тренажёр приёмов: враг-манекен в цикле исполняет выбранный приём, игроку выдаётся debug-лоадаут.
+@export var technique_drill: bool = false
 
 ## Точка прибытия игрока (создаётся в _ready).
 var arrival: Marker3D = null
+var drill: TechniqueDrill = null
 var _enemy: Node3D = null
 
 
@@ -30,6 +33,9 @@ func _ready() -> void:
 func respawn() -> void:
 	if is_instance_valid(_enemy):
 		_enemy.queue_free()
+	if is_instance_valid(drill):
+		drill.queue_free()
+		drill = null
 	_enemy = enemy_scene.instantiate() as Node3D
 	_enemy.name = "Enemy_%s" % cell_name
 	_enemy.set("stats", enemy_stats)
@@ -37,3 +43,14 @@ func respawn() -> void:
 	_enemy.set("is_dummy", is_dummy)
 	add_child(_enemy)
 	_enemy.position = Vector3(0.0, 0.05, ENEMY_Z)
+	if technique_drill:
+		drill = TechniqueDrill.new()
+		drill.name = "TechniqueDrill"
+		add_child(drill)
+		drill.setup(_enemy as CombatCharacter3D, TechniqueLoadout.load_all())
+
+
+## Вызывается порталом при входе игрока: в клетке приёмов выдаёт полный набор.
+func arm_player(player: CombatCharacter3D) -> void:
+	if technique_drill and is_instance_valid(drill):
+		TechniqueLoadout.give(player, drill.techniques)
