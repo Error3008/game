@@ -76,6 +76,10 @@ var _cam_side: Vector3 = Vector3.RIGHT
 
 
 func _ready() -> void:
+	if get_tree().get_nodes_in_group(CombatFX.GROUP).is_empty():
+		var fx := CombatFX.new()
+		fx.name = "CombatFX"
+		add_child(fx)
 	if personalities.is_empty():
 		for path in DEFAULT_PERSONALITIES:
 			personalities.append(load(path) as AIPersonality)

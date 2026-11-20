@@ -179,7 +179,7 @@ func _apply_kick_impact(target_node: Node3D) -> void:
 			target_node.stamina_component.trigger_guard_break(actor)
 
 		# 3. Apply damage and knockback
-		_hit_target(target_node, guard_break_damage, knockback_dir * guard_break_knockback)
+		_hit_target(target_node, guard_break_damage, knockback_dir * guard_break_knockback, true)
 
 		# 4. Apply heavy guard break stagger (1.5s stun)
 		if target_node.has_method("stagger"):
@@ -198,9 +198,11 @@ func _apply_kick_impact(target_node: Node3D) -> void:
 		kick_hit_landed.emit(target_node, false)
 
 
-func _hit_target(target_node: Node3D, dmg: float, knockback: Vector3) -> void:
+func _hit_target(target_node: Node3D, dmg: float, knockback: Vector3, broke_guard: bool = false) -> void:
 	if target_node.has_method("take_hit"):
-		target_node.take_hit(DamageInfo.make(dmg, knockback, actor, &"kick"))
+		var info: DamageInfo = DamageInfo.make(dmg, knockback, actor, &"kick")
+		info.broke_guard = broke_guard
+		target_node.take_hit(info)
 	elif target_node.has_method("take_damage"):
 		target_node.take_damage(dmg, knockback, actor)
 

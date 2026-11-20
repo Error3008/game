@@ -54,5 +54,21 @@ func _run_tests() -> void:
 	fx.enabled = false
 	print(">> TEST 3 PASSED")
 
+	print("\n[TEST 4] kick guard break and blade crossing")
+	var kick_info: DamageInfo = DamageInfo.make(10.0, Vector3.ZERO, player, &"kick")
+	assert(CombatFX.kind_for({"final_damage": 10.0}, kick_info) == CombatFX.Kind.HIT, "plain kick = hit")
+	kick_info.broke_guard = true
+	assert(CombatFX.kind_for({"final_damage": 10.0}, kick_info) == CombatFX.Kind.GUARD_BREAK, "guard-breaking kick")
+	# Клинки рядом: искры на скрещении, а не на теле; клинки далеко: на теле
+	var hit: DamageInfo = DamageInfo.make(10.0, Vector3.ZERO, player, &"light")
+	var body_point: Vector3 = fx._contact_for(CombatFX.Kind.HIT, hit, dummy)
+	assert(body_point.distance_to(dummy.global_position + Vector3.UP * fx.chest_height) < 0.5, "hit on body")
+	var guarded: Vector3 = fx._contact_for(CombatFX.Kind.BLOCK, hit, dummy)
+	assert(guarded.is_finite(), "block point valid")
+	fx.crossing_max_gap = 0.0
+	var far: Vector3 = fx._contact_for(CombatFX.Kind.BLOCK, hit, dummy)
+	assert(far.distance_to(dummy.global_position + Vector3.UP * fx.chest_height) < 0.5, "far blades -> body")
+	print(">> TEST 4 PASSED")
+
 	print("\nALL FX TESTS PASSED 100%!")
 	quit()
