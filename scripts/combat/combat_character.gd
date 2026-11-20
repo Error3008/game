@@ -533,8 +533,11 @@ func take_hit(info: DamageInfo) -> Dictionary:
 		health_component.take_damage(final_damage, attacker_node)
 		print("[%s] Took %.1f damage from %s. Remaining HP: %.1f" % [name, final_damage, att_name, health_component.current_health])
 
-	# 4. Hit reaction: чистое попадание прерывает текущее действие получателя
-	if info.causes_hit_react and is_alive() and not was_blocked and final_damage > 0.0 and not is_staggered:
+	# 4. Hit reaction: чистое попадание прерывает текущее действие получателя (hyper armor не прерывается)
+	var armored := has_hyper_armor()
+	if armored:
+		final_knockback *= 0.3
+	if info.causes_hit_react and not armored and is_alive() and not was_blocked and final_damage > 0.0 and not is_staggered:
 		_react_to_hit()
 		result["reacted"] = true
 
@@ -590,6 +593,18 @@ func _react_to_hit() -> void:
 	play_action(ACTION_HIT_REACT, 1.0)
 	is_staggered = true
 	stagger_timer = stats.hit_react_stun_duration
+
+
+## Есть ли сейчас защита от прерывания (оружие с hyper_armor в окне замах + активная фаза).
+func has_hyper_armor() -> bool:
+	return is_instance_valid(attack_component) and attack_component.has_hyper_armor()
+
+
+## Профиль идущей атаки (WeaponData) или null, если актор не атакует. Для ИИ и FX.
+func get_current_attack_profile() -> WeaponData:
+	if is_instance_valid(attack_component) and attack_component.is_attacking:
+		return attack_component.weapon_data
+	return null
 
 
 func on_attack_deflected(by_node: Node3D) -> void:

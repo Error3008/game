@@ -64,9 +64,7 @@ func _setup_weapon_hitbox() -> void:
 	if weapon_node and is_instance_valid(hitbox_scene):
 		weapon_hitbox = hitbox_scene.instantiate() as Hitbox
 		weapon_hitbox.attacker = actor
-		weapon_hitbox.damage = weapon_data.damage
-		weapon_hitbox.knockback_force = weapon_data.knockback_force
-		weapon_hitbox.block_stamina_damage = weapon_data.block_stamina_damage
+		weapon_hitbox.apply_weapon(weapon_data)
 		weapon_hitbox.collision_mask = target_collision_mask
 		weapon_node.add_child(weapon_hitbox)
 
@@ -125,9 +123,7 @@ func process_attack(delta: float) -> void:
 	# Phase 2: Active Swing
 	elif attack_time_elapsed < weapon_data.active_end_time:
 		if is_instance_valid(weapon_hitbox) and not weapon_hitbox.is_active:
-			weapon_hitbox.damage = weapon_data.damage
-			weapon_hitbox.knockback_force = weapon_data.knockback_force
-			weapon_hitbox.block_stamina_damage = weapon_data.block_stamina_damage
+			weapon_hitbox.apply_weapon(weapon_data)
 			weapon_hitbox.damage_source = &"light" if is_instance_valid(light_weapon_data) and weapon_data == light_weapon_data else &"heavy"
 			weapon_hitbox.set_active(true)
 			attack_hitbox_opened.emit()
@@ -167,6 +163,11 @@ func end_attack() -> void:
 
 func is_in_recovery() -> bool:
 	return is_attacking and attack_time_elapsed >= weapon_data.active_end_time
+
+
+## Защита от прерывания: оружие с hyper_armor, от начала замаха до конца активной фазы.
+func has_hyper_armor() -> bool:
+	return is_in_threat_phase() and weapon_data.hyper_armor
 
 
 func is_in_threat_phase() -> bool:

@@ -9,6 +9,11 @@ signal hit_landed(target: Node3D, damage: float)
 ## Цена блока этого удара в стамине защитника (из WeaponData). -1 = цена блока по умолчанию.
 @export var block_stamina_damage: float = -1.0
 
+var damage_type: DamageInfo.DamageType = DamageInfo.DamageType.PHYSICAL
+var unblockable: bool = false
+var unparryable: bool = false
+var break_damage: float = 0.0
+
 ## Метка источника для DamageInfo.source (&"heavy", &"light"); MeleeAttackComponent выставляет по типу атаки.
 var damage_source: StringName = &"heavy"
 
@@ -73,8 +78,24 @@ func _deal(receiver: Object, knockback_dir: Vector3) -> bool:
 	return false
 
 
+## Копирует параметры удара из оружия.
+func apply_weapon(w: WeaponData) -> void:
+	damage = w.damage
+	knockback_force = w.knockback_force
+	block_stamina_damage = w.block_stamina_damage
+	damage_type = w.damage_type
+	unblockable = w.unblockable
+	unparryable = w.unparryable
+	break_damage = w.break_damage
+
+
 func _build_damage_info(knockback_dir: Vector3) -> DamageInfo:
-	return DamageInfo.make(damage, knockback_dir * knockback_force, attacker, damage_source, block_stamina_damage)
+	var info := DamageInfo.make(damage, knockback_dir * knockback_force, attacker, damage_source, block_stamina_damage)
+	info.damage_type = damage_type
+	info.unblockable = unblockable
+	info.unparryable = unparryable
+	info.break_damage = break_damage
+	return info
 
 
 func _on_body_entered(body: Node3D) -> void:

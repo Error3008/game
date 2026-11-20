@@ -208,11 +208,15 @@ func evaluate_hit(info: DamageInfo) -> Dictionary:
 		"was_penalty": false
 	}
 
+	# Неблокируемый удар проходит сквозь блок, парирование и штраф
+	if info.unblockable:
+		return result
+
 	# Check frontal angle requirement
 	var in_front := can_block_from(attacker)
 
 	# 1. Active Parry Check (Gold Window) - strictly in front
-	if block_state == BlockState.ACTIVE_PARRY and in_front:
+	if block_state == BlockState.ACTIVE_PARRY and in_front and not info.unparryable:
 		result["handled"] = true
 		result["damage_taken"] = 0.0
 		result["knockback_taken"] = Vector3.ZERO
@@ -240,7 +244,9 @@ func evaluate_hit(info: DamageInfo) -> Dictionary:
 		return result
 
 	# 2. Passive Block Check (Blue) - strictly in front
-	if block_state == BlockState.PASSIVE_BLOCK and in_front:
+	# Непарируемый удар в окне парирования обычный блок
+	var can_block := block_state == BlockState.PASSIVE_BLOCK or (block_state == BlockState.ACTIVE_PARRY and info.unparryable)
+	if can_block and in_front:
 		result["handled"] = true
 		result["damage_taken"] = amount * (1.0 - block_damage_reduction)
 		result["knockback_taken"] = knockback * (1.0 - block_knockback_reduction)
